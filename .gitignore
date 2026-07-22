@@ -32,3 +32,6 @@ output/
 
 # Scratchpad
 exploration/
+
+# UV lock file. I know it should get included but it causes problems on the cluster vs laptop runs
+uv.lock

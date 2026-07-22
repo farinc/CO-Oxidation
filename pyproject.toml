@@ -47,9 +47,15 @@ me-mkm = { git = "https://github.com/farinc/me-mkm-tiling.git", branch = "main" 
 scikit-tt = { git = "https://github.com/PGelss/scikit_tt" }
 
 [tool.uv]
-# petsc4py hard-requires the pip-built "petsc" package with no marker to opt out.
-# We rely on a native PETSc install instead (set PETSC_DIR/PETSC_ARCH), so drop that edge.
+# Do not allow uv to install its own native PETSc/SLEPc copies.
 override-dependencies = [
     "petsc ; sys_platform == 'never'",
+    "slepc ; sys_platform == 'never'",
 ]
-no-build-isolation-package = ["petsc4py"]
+
+# Build the wrappers inside the project environment so PETSC_DIR and
+# SLEPC_DIR refer to the cluster installations.
+no-build-isolation-package = [
+    "petsc4py",
+    "slepc4py",
+]
