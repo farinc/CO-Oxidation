@@ -14,6 +14,8 @@ dependencies = [
 
 [project.optional-dependencies]
 mpi = [
+    "setuptools>=80",
+    "cython>=3",
     "mpi4py>=4.1.2",
     "petsc4py>=3.25.3",
     "slepc4py>=3.25.1",
