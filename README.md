@@ -51,23 +51,62 @@ uv run python -m sweeps.linear --L 24 --out case1
 uv run pytest                                  # test suite for development purposes
 ```
 
-`sweeps/linear.py` and `sweeps/mpi.py` write `{out}_kmc_sweep.csv` (default
-prefix `co_oxidation`). The mean-field comparison CSVs and bifurcation plot
-live in `tests/test_bistability.py`, which uses `tests/support/meanfield.py`
-and `tests/support/plot.py`.
+Both `sweeps/linear.py` and `sweeps/mpi.py` run two phases and write two files
+(default prefix `co_oxidation`):
+
+- **kMC + ME-MKM sweep** &rarr; `{out}_kmc_sweep.csv`: per-beta kMC steady
+  coverages (from the empty and CO-covered starts) *and* the ME-MKM steady
+  coverages (`memkm_empty/co/o`) plus the basin-weight ratio
+  `log10 pi(A)/pi(B)` (`log_ratio`).
+- **Coexistence analysis** &rarr; `{out}_coexistence.csv`: for each beta\* where
+  `log_ratio` changes sign (Brent-refined), the slow eigenvalues, the
+  committor-based basin transition rates `k_AB`, `k_BA`, the reactive flux, and
+  two-state-kinetics diagnostics.
+
+The ME-MKM / spectral phase uses SLEPc (eigenvectors) and PETSc (steady state
+and committors); `--plot` also renders the per-beta\* spectral figures. Pass
+`--no-coexistence` for a plain kMC-only sweep (the original behaviour), and
+`--sites N` to set the ME-MKM tile size.
 
 Runs stop at `--tmax` (kMC time) or `--max-steps` events, whichever comes first. Steady-state coverages are time-weighted averages over the second half of the run.
 
+The mean-field / bifurcation figures are drawn from a finished sweep CSV with
+`uv run python -m sweeps.plotting {out}_kmc_sweep.csv`.
+
 Note that `sweeps/linear.py` remains available for a plain single-core run. If done on a laptop limit the sweep to a few beta cause the runs are not run in parallel and take considerable time.
+
+### PETSc / SLEPc (the coexistence phase)
+
+The ME-MKM phase needs `mpi4py`, `petsc4py`, and `slepc4py` (the `mpi` extra),
+built against a PETSc/SLEPc that provides a **parallel** sparse LU (MUMPS,
+SuperLU_DIST, or PaStiX) for the shift-invert eigensolve on large tiles. The
+code auto-selects the best available solver (override with `--factor-solver`).
+
+To build the bindings against a native PETSc/SLEPc install (e.g. the system
+packages on a workstation, or a cluster module):
+
+```sh
+set -x PETSC_DIR /opt/petsc/linux-c-opt   # your PETSc prefix
+set -x SLEPC_DIR /opt/slepc/linux-c-opt   # your SLEPc prefix
+uv pip install --no-build-isolation "petsc4py==3.25.*" "slepc4py==3.25.*"
+```
+
+`uv run` needs the PETSc/SLEPc `lib/` directories on `LD_LIBRARY_PATH` (and the
+`PETSC_DIR`/`SLEPC_DIR` above) to load the shared libraries at runtime.
 
 ### Running on an HPC cluster
 
-`sweeps/mpi.py` parallelizes the beta sweep's ~52 independent `(beta, (empty, full))` 
-configurations using OpenMPI and runs kMC across MPI ranks (round-robin, gathered on rank 0). 
+`sweeps/mpi.py` runs the kMC `(beta, (empty, full))` cases round-robin across
+MPI ranks (gathered on rank 0), then runs the ME-MKM / SLEPc coexistence
+analysis *collectively* -- all ranks cooperate on each beta's distributed
+generator, one beta at a time. Two submit scripts are provided:
 ```sh
-qsub submit_kmc_sge.sh --L 24 --out case1
+qsub submit_kmc_sge.sh --L 24 --out case1                  # kMC sweep
+qsub submit_coexistence_sge.sh --sites 12 --out big        # + coexistence
 ```
-Everything after the script name on the `qsub` command line is forwarded to `sweeps/mpi.py`. This is considerably faster than using the linear sweep. 
+Everything after the script name is forwarded to `sweeps/mpi.py` (including any
+`-eps_*`/`-st_*` PETSc/SLEPc runtime options). The cluster build should include
+MUMPS (`--download-mumps`); see the comments in `submit_coexistence_sge.sh`.
 
 ## Using as a Dependency
 Since this is a `uv` library you can use this as a dependency in other projects:

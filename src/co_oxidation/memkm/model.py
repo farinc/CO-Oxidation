@@ -1,5 +1,5 @@
 from me_mkm import BepInteraction, InitialStateInteraction, MEMKMBuilder, Reaction
-from .common import EMPTY, CO, O
+from ..common import EMPTY, CO, O
 
 def generate_model(beta, tile):
     temperature=500.0
@@ -13,7 +13,7 @@ def generate_model(beta, tile):
         "kr": 1,
         "kh": khop,
     }
-    # Eigenvalues and eigenvectors of the W, ask AI. 2D analog with observables a L.C of eigenvectors. 
+    # Eigenvalues and eigenvectors of the W, ask AI. 2D analog with observables a L.C of eigenvectors.
     # The more eligant solution is spectral theory.
     # Overcoming a heirarty of timescale seperations
     RT = 8.314462618 * temperature # J/mol

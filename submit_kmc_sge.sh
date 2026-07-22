@@ -2,7 +2,7 @@
 #$ -N kmc_co_ox
 #$ -cwd
 #$ -j y
-#$ -pe mpi 24
+#$ -pe orte 24
 
 module purge
 unset OMPI_MCA_btl
@@ -16,4 +16,4 @@ source .venv/bin/activate
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=1
 
-mpirun -np 24 python -m sweeps.mpi "$@"
+mpirun -np 24 python -m sweeps.mpi --no-coexistence 

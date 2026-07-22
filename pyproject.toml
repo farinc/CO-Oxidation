@@ -14,27 +14,22 @@ dependencies = [
 
 [project.optional-dependencies]
 mpi = [
-    "mpi4py>=4.1.2 ; sys_platform == 'linux'",
-    "petsc4py ; sys_platform == 'linux'",
+    "mpi4py>=4.1.2",
+    "petsc4py>=3.25.3",
+    "slepc4py>=3.25.1",
 ]
-plot = [
-    "matplotlib>=3.10",
-    "seaborn>=0.13.2",
+tt = [
+    "scikit-tt",
 ]
 
 [dependency-groups]
 dev = [
-    "co-oxidation[plot]",
     "notebook>=7.6.0",
     "pandas>=3.0.3",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "scipy>=1.18.0",
+    "seaborn>=0.13.2",
 ]
-
-[project.scripts]
-kmc-run = "co_oxidation.cli:main"
-co-oxidation-plot = "co_oxidation.plotting:main"
 
 [build-system]
 requires = ["hatchling>=1.26"]
@@ -48,4 +43,13 @@ pythonpath = ["."]
 testpaths = ["tests"]
 
 [tool.uv.sources]
-me-mkm = { git = "https://github.com/farinc/me-mkm-tiling.git" }
+me-mkm = { git = "https://github.com/farinc/me-mkm-tiling.git", branch = "main" }
+scikit-tt = { git = "https://github.com/PGelss/scikit_tt" }
+
+[tool.uv]
+# petsc4py hard-requires the pip-built "petsc" package with no marker to opt out.
+# We rely on a native PETSc install instead (set PETSC_DIR/PETSC_ARCH), so drop that edge.
+override-dependencies = [
+    "petsc ; sys_platform == 'never'",
+]
+no-build-isolation-package = ["petsc4py"]
