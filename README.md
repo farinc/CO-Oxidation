@@ -47,18 +47,15 @@ There are two mutually exclusive options for installing the PETSc/SLEPc dependen
 # Option 1: link against a PETSc/SLEPc that already exists on the system
 # (e.g. a cluster module, or system packages). Set PETSC_DIR/SLEPC_DIR first.
 module load gcc/10.3.0 petsc/3.25.3-real slepc/3.25.1-real openmpi/4.1.2 cmake/3.28.4
-UV_LOCK_TIMEOUT=600 uv sync --extra native-petsc -v
-UV_LOCK_TIMEOUT=600 uv sync --extra native-slepc -v
+UV_LOCK_TIMEOUT=600 uv sync --extra native-petsc -v && uv sync --extra native-slepc -v
 ```
 ```sh
 # Option 2: build PETSc/SLEPc from source via the PyPI `petsc`/`slepc`
 # packages; no external install needed, but the first sync compiles
 # PETSc/SLEPc, which is slow.
-UV_LOCK_TIMEOUT=1200 uv sync --extra source-petsc
-UV_LOCK_TIMEOUT=1200 uv sync --extra source-slepc
+UV_LOCK_TIMEOUT=1200 uv sync --extra source-petsc && uv sync --extra source-slepc
 ```
-
-Once that completes your ready to code! IDE's and the code editor VS Code is aware of python enivroments and will activate them for you to run files and code hints related to the dependencies.
+Once that done your ready to code! IDE's and the code editor VS Code is aware of python enivroments and will activate them for you to run files and code hints related to the dependencies. Otherwise, use `source .venv/bin/activate` on your linux machine/Git Bash. There probably a way to do this in other terminals...
 
 ## Usage
 ```sh
@@ -102,13 +99,35 @@ Everything after the script name is forwarded to `sweeps/mpi.py` (including any
 MUMPS (`--download-mumps`); see the comments in `submit_coexistence_sge.sh`.
 
 ## Using as a Dependency
-Since this is a `uv` library you can use this as a dependency in other projects:
+Since this is a `uv` hybrid project and library you can use this as a dependency in other projects:
 ```sh
 uv init
 uv add "co_oxidation @ git+https://github.com/farinc/CO-Oxidation.git"
 ``` 
+A few examples:
 
-Then one can use it like a model
 ```python
-from kmc_co_oxidation import 
+# kMC: run one trajectory at a given O2 impingement rate beta
+from co_oxidation.kmc import KMCParams, run_kmc
+
+result = run_kmc(beta=5.0, init="empty", params=KMCParams(L=16))
+print(result.steady_co, result.steady_o)
+```
+
+```python
+# Mean field: steady-state branches over a beta range
+from co_oxidation.meanfield import steady_states, branches
+
+state = steady_states(beta=5.0)              # single beta
+curves = branches(betas=[0, 2, 4, 6, 8, 10])  # full bifurcation sweep
+```
+
+```python
+# ME-MKM needs the some `petsc` and `slepc` aviable.
+from me_mkm import TileSettings
+from co_oxidation.memkm import generate_model, CoexistencePipeline
+
+tile = TileSettings.smallest_valid_square(8, True)  # 8-site ME-MKM tile
+pipeline = CoexistencePipeline(tile)
+log_ratio = pipeline.basin_log_ratio(beta=5.0)       # log10 pi(A)/pi(B)
 ```

@@ -22,8 +22,14 @@ native-petsc = [
     "co-oxidation[mpi]",
     "petsc4py==3.25.3",
 ]
+# Lists petsc4py directly rather than via "co-oxidation[native-petsc]": a
+# two-deep self-referential extra chain (native-slepc -> native-petsc -> mpi)
+# was silently dropping mpi/cython/setuptools from `uv sync --extra
+# native-slepc` even though petsc4py (only one level of nesting) survived.
+# Keeping every extra at exactly one level of self-reference avoids that.
 native-slepc = [
-    "co-oxidation[native-petsc]",
+    "co-oxidation[mpi]",
+    "petsc4py==3.25.3",
     "slepc4py==3.25.1",
 ]
 source-petsc = [
@@ -32,7 +38,9 @@ source-petsc = [
     "petsc4py==3.25.3",
 ]
 source-slepc = [
-    "co-oxidation[source-petsc]",
+    "co-oxidation[mpi]",
+    "petsc==3.25.3",
+    "petsc4py==3.25.3",
     "slepc==3.25.1",
     "slepc4py==3.25.1",
 ]
