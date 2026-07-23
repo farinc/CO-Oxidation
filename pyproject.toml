@@ -14,10 +14,10 @@ dependencies = [
 
 [project.optional-dependencies]
 mpi = [
+    "cython>=3",
+    "setuptools",
     "mpi4py>=4.1.2",
-    "petsc==3.25.3",
     "petsc4py==3.25.3",
-    "slepc==3.25.1",
     "slepc4py==3.25.1",
 ]
 tt = [
@@ -47,11 +47,17 @@ testpaths = ["tests"]
 me-mkm = { git = "https://github.com/farinc/me-mkm-tiling.git", branch = "main" }
 scikit-tt = { git = "https://github.com/PGelss/scikit_tt" }
 
-[tool.uv.extra-build-variables]
-petsc = { PETSC_CONFIGURE_OPTIONS = "--with-scalar-type=real --with-64-bit-indices=0 --download-openblas --download-metis --download-parmetis --download-scalapack --download-mumps --download-hypre --download-superlu_dist COPTFLAGS='-O3 -march=haswell -mtune=haswell' CXXOPTFLAGS='-O3 -march=haswell -mtune=haswell' FOPTFLAGS='-O3 -march=haswell -mtune=haswell'" }
-slepc = { SLEPC_CONFIGURE_OPTIONS = "--download-arpack --download-primme" }
+no-build-isolation-package = [
+    "petsc4py", 
+    "slepc4py"
+]
 
-[tool.uv.extra-build-dependencies]
-# petsc4py = [{ requirement = "petsc", match-runtime = true }]
-slepc = [{ requirement = "petsc", match-runtime = true }]
-slepc4py = [{ requirement = "slepc", match-runtime = true }]
+[[tool.uv.dependency-metadata]]
+name = "petsc4py"
+version = "3.25.3"
+requires-dist = ["numpy"]
+
+[[tool.uv.dependency-metadata]]
+name = "slepc4py"
+version = "3.25.1"
+requires-dist = ["numpy", "petsc4py"]
