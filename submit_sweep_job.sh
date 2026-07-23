@@ -1,7 +1,6 @@
 #!/bin/bash
 #$ -cwd
 #$ -j y
-#$ -pe orte 24
 
 module purge
 unset OMPI_MCA_btl
@@ -15,5 +14,5 @@ export OMP_NUM_THREADS=1
 source .venv/bin/activate
 
 # The $@ syntax in Bash forwards all parameters to sweep.mpi
-#   qsub -N big_tile submit_sweep_job.sh --memkm-sites 12 --out big
+#   qsub -N -pe orte 24 big_tile submit_sweep_job.sh --memkm-sites 12 --out big
 mpirun -np 24 python -m sweeps.mpi "$@"
