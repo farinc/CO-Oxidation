@@ -28,7 +28,8 @@ class CoexistencePipeline:
 
     def __init__(self, tile, comm=None, order_species="CO", core_frac=0.1,
                  sigma_scale=1e-8, factor=None, basin_species=None,
-                 delta_scale=1e-4):
+                 delta_scale=1e-4, alpha=1.6, gamma=1e-3, kr=1.0,
+                 khop_scale=1000.0, eps=8368.0, temperature=500.0):
         if not 0.0 < core_frac < 0.5:
             raise ValueError("core_frac must be in (0, 0.5) so the two cores "
                              f"stay disjoint; got {core_frac}")
@@ -39,6 +40,11 @@ class CoexistencePipeline:
         self.core_frac = core_frac
         self.sigma_scale = sigma_scale
         self.delta_scale = delta_scale   # delta = delta_scale * beta
+        # Shared physics, forwarded to generate_model so the ME-MKM model uses
+        # the same chemistry as the kMC sweep (see co_oxidation.memkm.model).
+        self.physics = dict(alpha=alpha, gamma=gamma, kr=kr,
+                            khop_scale=khop_scale, eps=eps,
+                            temperature=temperature)
         self.factor = factor
         self._cache = {}       # beta -> theta + committor (no PETSc objects)
         self._spectral = {}    # (beta, k) -> eigenpairs
@@ -96,7 +102,7 @@ class CoexistencePipeline:
         if beta in self._cache:
             return self._cache[beta]
         builder = generate_model(beta=beta, tile=self.tile,
-                                 delta_scale=self.delta_scale)
+                                 delta_scale=self.delta_scale, **self.physics)
         core_A, core_B = self.basin_cores(builder)
         W = backend.build_petsc_W(builder, self.comm)
         sigma = self.sigma_scale * backend.rate_scale(W)

@@ -2,14 +2,14 @@
 Plot: render the bifurcation and rate figures for a beta sweep.
 
 Reads a {out}_kmc_sweep.csv file (as written by sweeps/linear.py or
-sweeps/mpi.py), computes the matching mean-field branches (Fig. 3) and
-rate curves (Fig. 4) on the fly via meanfield.branches/meanfield.rates,
-and writes {out}_bifurcation.png and {out}_rates.png next to it. Fig. 3 /
-Fig. 4 style plots of Tian & Rangarajan (2021). delta = beta * 1e-4
-throughout, matching the sweeps' --delta-scale-beta flag.
+sweeps/mpi.py) and the matching {out}_meanfield.csv branch file (the mean-field
+phase; if it is absent the branches are recomputed on the fly), then writes
+{out}_bifurcation.png (Fig. 3) and {out}_rates.png (Fig. 4) next to them. Fig. 3
+/ Fig. 4 style plots of Tian & Rangarajan (2021). delta = beta * 1e-4 by
+default, matching the sweeps' --delta-scale-beta flag.
 
 Usage:
-    uv run python -m co_oxidation.plotting co_oxidation_kmc_sweep.csv
+    uv run python -m sweeps.plotting co_oxidation_kmc_sweep.csv
 """
 
 import argparse
@@ -24,39 +24,28 @@ from co_oxidation import meanfield
 
 sns.set_theme(style="whitegrid")
 
-from sweeps._common import DELTA_SCALE   # keep sweep and plot at the same delta
-MODELS = ("mf", "ea")
+# The mean-field branches are computed by the sweep's mean-field phase
+# (sweeps._common.run_meanfield); this module only draws them.
+from sweeps._common import (DELTA_SCALE, MEANFIELD_MODELS, build_meanfield_betas,
+                            run_meanfield)
 MODEL_LABELS = {"mf": "MF-MK", "ea": "Ea-MK"}
 MODEL_COLORS = {"mf": None, "ea": "green"}
 
-def branch_dataframe(betas_fine, delta_scale=DELTA_SCALE):
-    """Branches of both models in the shape plot.plot_bifurcation expects."""
-    frames = []
-    for model in MODELS:
-        rows = {"stable_hi": [], "stable_lo": [], "unstable": []}
-        for b in betas_fine:
-            hi, lo, un = meanfield.branches(
-                [b], model=model, delta=b * delta_scale)
-            rows["stable_hi"].append(hi[0])
-            rows["stable_lo"].append(lo[0])
-            rows["unstable"].append(un[0])
-        for branch, arr in rows.items():
-            arr = np.asarray(arr)
-            frames.append(pd.DataFrame({
-                "model": model, "branch": branch, "beta": betas_fine,
-                "theta_empty": arr[:, 0], "theta_co": arr[:, 1],
-                "theta_o": arr[:, 2],
-            }))
-    return pd.concat(frames, ignore_index=True)
 
+def rates_dataframe(beta, theta_o, delta_scale=DELTA_SCALE, mf_physics=None):
+    """Fig. 4 rate curves vs theta_CO at fixed beta and theta_O.
 
-def rates_dataframe(beta, theta_o, delta_scale=DELTA_SCALE):
-    """Fig. 4 rate curves vs theta_CO at fixed beta and theta_O."""
+    `mf_physics` is the shared mean-field chemistry (alpha, gamma, kr, eps,
+    temperature); None uses meanfield.rates' defaults."""
+    mf_kw = dict(mf_physics or {})
+    if "temperature" in mf_kw:
+        mf_kw["T"] = mf_kw.pop("temperature")
     theta_co = np.linspace(1e-4, 1.0 - theta_o - 1e-4, 200)
     frames = []
-    for model in MODELS:
+    for model in MEANFIELD_MODELS:
         _, r_des_co, r_ads_o, r_oxi, _ = meanfield.rates(
-            theta_co, theta_o, beta, model=model, delta=beta * delta_scale)
+            theta_co, theta_o, beta, model=model, delta=beta * delta_scale,
+            **mf_kw)
         frames.append(pd.DataFrame({
             "model": model, "beta": beta, "theta_o": theta_o,
             "theta_co": theta_co, "r_oxi": r_oxi, "r_ads_o": r_ads_o,
@@ -66,22 +55,28 @@ def rates_dataframe(beta, theta_o, delta_scale=DELTA_SCALE):
 
 
 def plot_bifurcation(branches, sweep, path):
-    """Fig. 3 style plot: theta_CO and theta_O vs beta."""
+    """Fig. 3 style plot: theta_CO and theta_O vs beta.
+
+    `branches` is the mean-field dataframe (as written to {out}_meanfield.csv);
+    pass None to draw only the kMC scatter points, e.g. when the mean-field
+    phase was skipped with --no-meanfield.
+    """
     L = int(sweep["L"].iloc[0])
     fig, axes = plt.subplots(2, 1, figsize=(7, 8), sharex=True)
     for ax, col, ylabel in ((axes[0], "theta_co", r"$\theta_{CO}$"),
                             (axes[1], "theta_o", r"$\theta_O$")):
-        for model in ("mf", "ea"):
-            mdf = branches[branches["model"] == model]
-            label = MODEL_LABELS[model]
-            hi = mdf[mdf["branch"] == "stable_hi"].sort_values("beta")
-            lo = mdf[mdf["branch"] == "stable_lo"].sort_values("beta")
-            un = mdf[mdf["branch"] == "unstable"].sort_values("beta")
-            line, = ax.plot(hi["beta"], hi[col], "-", color=MODEL_COLORS[model],
-                            label=f"{label} stable")
-            ax.plot(lo["beta"], lo[col], "-", color=line.get_color())
-            ax.plot(un["beta"], un[col], "--", color=line.get_color(),
-                    label=f"{label} unstable")
+        if branches is not None:
+            for model in MEANFIELD_MODELS:
+                mdf = branches[branches["model"] == model]
+                label = MODEL_LABELS[model]
+                hi = mdf[mdf["branch"] == "stable_hi"].sort_values("beta")
+                lo = mdf[mdf["branch"] == "stable_lo"].sort_values("beta")
+                un = mdf[mdf["branch"] == "unstable"].sort_values("beta")
+                line, = ax.plot(hi["beta"], hi[col], "-",
+                                color=MODEL_COLORS[model], label=f"{label} stable")
+                ax.plot(lo["beta"], lo[col], "-", color=line.get_color())
+                ax.plot(un["beta"], un[col], "--", color=line.get_color(),
+                        label=f"{label} unstable")
         key = "co" if col == "theta_co" else "o"
         ax.scatter(sweep["beta"], sweep[f"{key}_full"], marker="o", zorder=5,
                   label="kMC (CO-covered start)")
@@ -364,25 +359,36 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
     plt.close(fig)
 
 
-def plot_sweep(sweep, out_prefix, delta_scale=DELTA_SCALE, beta_fine_step=0.05,
-               rates_beta=4.0, rates_theta_o=0.01):
+def plot_sweep(sweep, out_prefix, branches=None, delta_scale=DELTA_SCALE,
+               rates_beta=4.0, rates_theta_o=0.01, mf_physics=None):
     """Bifurcation + rate figures from a sweep dataframe, at the delta the
-    sweep actually used. Writes {out_prefix}_bifurcation.png and _rates.png."""
-    betas_fine = np.arange(sweep["beta"].min(),
-                           sweep["beta"].max() + 0.5 * beta_fine_step,
-                           beta_fine_step)
-    plot_bifurcation(branch_dataframe(betas_fine, delta_scale), sweep,
-                     f"{out_prefix}_bifurcation.png")
-    plot_rates(rates_dataframe(rates_beta, rates_theta_o, delta_scale),
-               f"{out_prefix}_rates.png")
-    return [f"{out_prefix}_bifurcation.png", f"{out_prefix}_rates.png"]
+    sweep actually used.
+
+    `branches` is the precomputed mean-field dataframe (the mean-field phase's
+    {out}_meanfield.csv). When it is None the mean-field lines and the rate
+    figure are skipped and only the kMC scatter bifurcation is drawn.
+    `mf_physics` is the shared mean-field chemistry used to recompute the rate
+    curves. Writes {out_prefix}_bifurcation.png and, when branches are
+    available, _rates.png.
+    """
+    plot_bifurcation(branches, sweep, f"{out_prefix}_bifurcation.png")
+    written = [f"{out_prefix}_bifurcation.png"]
+    if branches is not None:
+        plot_rates(rates_dataframe(rates_beta, rates_theta_o, delta_scale,
+                                   mf_physics=mf_physics),
+                   f"{out_prefix}_rates.png")
+        written.append(f"{out_prefix}_rates.png")
+    return written
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("csv", help="path to a {out}_kmc_sweep.csv file")
-    ap.add_argument("--beta-fine-step", type=float, default=0.05,
-                    help="beta grid step for the mean-field branches")
+    ap.add_argument("--meanfield-beta-step", "--beta-fine-step",
+                    dest="meanfield_beta_step", type=float, default=0.05,
+                    help="fill-in beta grid step used only when no "
+                         "{out}_meanfield.csv is found and the branches must "
+                         "be recomputed")
     ap.add_argument("--rates-beta", type=float, default=4.0,
                     help="fixed beta for the Fig. 4 rate plot")
     ap.add_argument("--rates-theta-o", type=float, default=0.01,
@@ -393,16 +399,33 @@ def main():
     dir = p.parents[0]
 
     # Drop only rows whose kMC coverages are missing; ME-MKM columns (added by
-    # the coexistence phase) may legitimately be NaN at some betas.
+    # the coexistence phase) may legitimately be NaN at some betas. A sweep run
+    # with --no-kmc has no complete kMC rows -- keep the frame so the
+    # mean-field branches still plot.
     kmc_cols = ["e_empty", "co_empty", "o_empty", "e_full", "co_full", "o_full"]
-    sweep = pd.read_csv(args.csv).dropna(subset=kmc_cols)
+    raw = pd.read_csv(args.csv)
+    sweep = raw.dropna(subset=kmc_cols)
+    if sweep.empty:
+        sweep = raw
     stem = p.stem.replace("_kmc_sweep", "")
 
     # use the delta the sweep recorded, so the branches match its kMC points
     delta_scale = (float(sweep["delta_scale"].iloc[0])
                    if "delta_scale" in sweep.columns else DELTA_SCALE)
-    for path in plot_sweep(sweep, f"{dir}/{stem}", delta_scale=delta_scale,
-                           beta_fine_step=args.beta_fine_step,
+
+    # Prefer the branches written by the sweep's mean-field phase; only
+    # recompute (on the fly, at the sweep's delta) if that file is absent.
+    mf_path = dir / f"{stem}_meanfield.csv"
+    if mf_path.exists():
+        branches = pd.read_csv(mf_path)
+        print(f"read mean-field branches from {mf_path.name}")
+    else:
+        betas_fine = build_meanfield_betas(sweep["beta"].to_numpy(),
+                                           args.meanfield_beta_step)
+        branches = run_meanfield(betas_fine, delta_scale=delta_scale)
+
+    for path in plot_sweep(sweep, f"{dir}/{stem}", branches=branches,
+                           delta_scale=delta_scale,
                            rates_beta=args.rates_beta,
                            rates_theta_o=args.rates_theta_o):
         print(f"wrote {Path(path).name}  (delta = {delta_scale:g} * beta)")

@@ -1,20 +1,30 @@
 from me_mkm import BepInteraction, InitialStateInteraction, MEMKMBuilder, Reaction
 from ..common import EMPTY, CO, O
 
-def generate_model(beta, tile, delta_scale=1e-4):
-    """ME-MKM generator at one beta. `delta_scale` ties the O2 desorption rate
-    to the impingement rate, delta = delta_scale * beta; pass 0.0 for
-    irreversible O2 adsorption. Keep it equal to the kMC sweep's --delta-scale
-    so the two models describe the same chemistry."""
-    temperature=500.0
-    alpha = 1.6
-    khop = 1000 * max(beta, alpha)
+def generate_model(beta, tile, delta_scale=1e-4, alpha=1.6, gamma=1e-3, kr=1.0,
+                   khop_scale=1000.0, eps=8368.0, temperature=500.0):
+    """ME-MKM generator at one beta.
+
+    The physical parameters mirror the kMC model (co_oxidation.kmc.KMCParams)
+    so both phases describe the same chemistry; the sweep drivers thread the
+    same CLI values into both:
+
+      alpha        CO adsorption rate, s^-1
+      gamma        CO desorption prefactor, s^-1
+      kr           CO + O reaction prefactor, s^-1
+      khop_scale   fast-diffusion factor: khop = khop_scale * max(beta, alpha)
+      eps          CO-CO nearest-neighbour repulsion, J/mol (enters as -eps)
+      temperature  temperature, K
+      delta_scale  O2 desorption scale: delta = delta_scale * beta; 0.0 for
+                   irreversible O2 adsorption.
+    """
+    khop = khop_scale * max(beta, alpha)
     rates = {
         "alpha": alpha,
         "beta": beta,
-        "gamma": 0.001,
+        "gamma": gamma,
         "delta": delta_scale * beta,
-        "kr": 1,
+        "kr": kr,
         "kh": khop,
     }
     # Eigenvalues and eigenvectors of the W, ask AI. 2D analog with observables a L.C of eigenvectors.
@@ -23,7 +33,7 @@ def generate_model(beta, tile, delta_scale=1e-4):
     RT = 8.314462618 * temperature # J/mol
     interaction_matrix = [ # J/mol
         [0, 0,   0],
-        [0, -8368 , 0],
+        [0, -eps , 0],
         [0, 0,   0]
     ]
     lateral = InitialStateInteraction(interaction_matrix, kbt=RT)

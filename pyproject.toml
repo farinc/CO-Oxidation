@@ -17,6 +17,23 @@ mpi = [
     "cython>=3",
     "setuptools",
     "mpi4py>=4.1.2",
+]
+# Two mutually exclusive ways to get petsc4py/slepc4py (both pull in "mpi"):
+#   native-petsc-slepc  - link against a PETSc/SLEPc that already exists on the
+#                          system (module load on a cluster, system packages).
+#                          Requires PETSC_DIR/SLEPC_DIR to be set before sync.
+#   source-petsc-slepc  - build PETSc/SLEPc from source via the PyPI "petsc"
+#                          and "slepc" packages; no external install needed,
+#                          but the first sync compiles PETSc/SLEPc (slow).
+native-petsc-slepc = [
+    "co-oxidation[mpi]",
+    "petsc4py==3.25.3",
+    "slepc4py==3.25.1",
+]
+source-petsc-slepc = [
+    "co-oxidation[mpi]",
+    "petsc==3.25.3",
+    "slepc==3.25.1",
     "petsc4py==3.25.3",
     "slepc4py==3.25.1",
 ]
@@ -47,9 +64,16 @@ testpaths = ["tests"]
 me-mkm = { git = "https://github.com/farinc/me-mkm-tiling.git", branch = "main" }
 scikit-tt = { git = "https://github.com/PGelss/scikit_tt" }
 
+[tool.uv]
 no-build-isolation-package = [
-    "petsc4py", 
-    "slepc4py"
+    "petsc4py",
+    "slepc4py",
+]
+conflicts = [
+    [
+        { extra = "native-petsc-slepc" },
+        { extra = "source-petsc-slepc" },
+    ],
 ]
 
 [[tool.uv.dependency-metadata]]
@@ -61,3 +85,13 @@ requires-dist = ["numpy"]
 name = "slepc4py"
 version = "3.25.1"
 requires-dist = ["numpy", "petsc4py"]
+
+[[tool.uv.dependency-metadata]]
+name = "petsc"
+version = "3.25.3"
+requires-dist = []
+
+[[tool.uv.dependency-metadata]]
+name = "slepc"
+version = "3.25.1"
+requires-dist = ["petsc"]
