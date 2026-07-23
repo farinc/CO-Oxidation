@@ -13,8 +13,9 @@ for beta* stays in lockstep across ranks.
 Phase C: 
 The mean-field branches are computed serially on rank 0. Rank 0 writes {out}_kmc_sweep.csv,
 {out}_coexistence.csv and {out}_meanfield.csv. Each phase can be turned off
-with --no-kmc / --no-memkm / --no-meanfield. Requires the `native-petsc-slepc`
-or `source-petsc-slepc` extra (taht is mpi4py, petsc4py, and slepc4py).
+with --no-kmc / --no-memkm / --no-meanfield. Requires the `native-petsc` +
+`native-slepc` or `source-petsc` + `source-slepc` extras (that is mpi4py,
+petsc4py, and slepc4py).
 
 Usage:
     mpirun -np 4 uv run python -m sweeps.mpi --memkm-sites 8 --out case1

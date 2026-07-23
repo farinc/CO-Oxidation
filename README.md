@@ -39,19 +39,23 @@ For running the kMC runs in parallel using MPI, then install the `mpi` group. No
 module load openmpi/4.1.2
 uv sync --extra mpi 
 ```
-There are two mutually exclusive options for installing the PETSc/SLEPc dependencies needed for ME-MKM support (`native-petsc-slepc` and `source-petsc-slepc`). Note that both will install the `mpi` group automatically. When using the `native-petsc-slepc` group, make sure the `PETSC_DIR` and `SLEPC_DIR` enviroment variables are set before hand alongside mpi runtime.
+There are two mutually exclusive options for installing the PETSc/SLEPc dependencies needed for ME-MKM support. Note that both install the `mpi` group automatically. When using the native option, make sure the `PETSC_DIR` and `SLEPC_DIR` enviroment variables are set before hand alongside mpi runtime.
+
+**You must run the two `uv sync` calls below separately, one after the other -- do not pass both extras in a single `uv sync` call.** `petsc4py` and `slepc4py` both build with `--no-build-isolation`, and `slepc4py`'s build needs `petsc4py` to already be installed; uv builds no-build-isolation packages within a single `uv sync` concurrently, so requesting both extras at once races the two builds and `slepc4py` fails to find `petsc4py`'s headers. Splitting into two sequential syncs guarantees `petsc4py` is fully installed before `slepc4py`'s build starts.
 
 ```sh
 # Option 1: link against a PETSc/SLEPc that already exists on the system
 # (e.g. a cluster module, or system packages). Set PETSC_DIR/SLEPC_DIR first.
 module load gcc/10.3.0 petsc/3.25.3-real slepc/3.25.1-real openmpi/4.1.2 cmake/3.28.4
-UV_LOCK_TIMEOUT=600 uv sync --extra native-petsc-slepc -v
+UV_LOCK_TIMEOUT=600 uv sync --extra native-petsc -v
+UV_LOCK_TIMEOUT=600 uv sync --extra native-slepc -v
 ```
 ```sh
 # Option 2: build PETSc/SLEPc from source via the PyPI `petsc`/`slepc`
 # packages; no external install needed, but the first sync compiles
 # PETSc/SLEPc, which is slow.
-UV_LOCK_TIMEOUT=1200 uv sync --extra source-petsc-slepc
+UV_LOCK_TIMEOUT=1200 uv sync --extra source-petsc
+UV_LOCK_TIMEOUT=1200 uv sync --extra source-slepc
 ```
 
 Once that completes your ready to code! IDE's and the code editor VS Code is aware of python enivroments and will activate them for you to run files and code hints related to the dependencies.

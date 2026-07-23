@@ -18,23 +18,22 @@ mpi = [
     "setuptools",
     "mpi4py>=4.1.2",
 ]
-# Two mutually exclusive ways to get petsc4py/slepc4py (both pull in "mpi"):
-#   native-petsc-slepc  - link against a PETSc/SLEPc that already exists on the
-#                          system (module load on a cluster, system packages).
-#                          Requires PETSC_DIR/SLEPC_DIR to be set before sync.
-#   source-petsc-slepc  - build PETSc/SLEPc from source via the PyPI "petsc"
-#                          and "slepc" packages; no external install needed,
-#                          but the first sync compiles PETSc/SLEPc (slow).
-native-petsc-slepc = [
+native-petsc = [
     "co-oxidation[mpi]",
     "petsc4py==3.25.3",
+]
+native-slepc = [
+    "co-oxidation[native-petsc]",
     "slepc4py==3.25.1",
 ]
-source-petsc-slepc = [
+source-petsc = [
     "co-oxidation[mpi]",
     "petsc==3.25.3",
-    "slepc==3.25.1",
     "petsc4py==3.25.3",
+]
+source-slepc = [
+    "co-oxidation[source-petsc]",
+    "slepc==3.25.1",
     "slepc4py==3.25.1",
 ]
 tt = [
@@ -71,8 +70,12 @@ no-build-isolation-package = [
 ]
 conflicts = [
     [
-        { extra = "native-petsc-slepc" },
-        { extra = "source-petsc-slepc" },
+        { extra = "native-petsc" },
+        { extra = "source-petsc" },
+    ],
+    [
+        { extra = "native-slepc" },
+        { extra = "source-slepc" },
     ],
 ]
 
