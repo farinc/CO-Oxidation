@@ -48,6 +48,12 @@ testpaths = ["tests"]
 me-mkm = { git = "https://github.com/farinc/me-mkm-tiling.git", branch = "main" }
 scikit-tt = { git = "https://github.com/PGelss/scikit_tt" }
 
+[tool.uv]
+no-build-isolation-package = [
+    "slepc",
+    "slepc4py",
+]
+
 [tool.uv.extra-build-variables]
 petsc = { PETSC_CONFIGURE_OPTIONS = "--with-scalar-type=real --with-64-bit-indices=0 --download-openblas --download-metis --download-parmetis --download-scalapack --download-mumps --download-hypre --download-superlu_dist COPTFLAGS='-O3 -march=haswell -mtune=haswell' CXXOPTFLAGS='-O3 -march=haswell -mtune=haswell' FOPTFLAGS='-O3 -march=haswell -mtune=haswell'" }
 slepc = { SLEPC_CONFIGURE_OPTIONS = "--download-arpack --download-primme" }
