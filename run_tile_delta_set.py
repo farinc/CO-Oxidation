@@ -7,7 +7,7 @@ out_dir = Path('output/')
 
 for i,l in enumerate(L):
     for delta_scale in Delta_scale:
-        prefix_job_name = f"tile_{l}_delta{i}"
+        prefix_job_name = f"{out_dir}tile_{l}_delta{i}"
         command = [
             "qsub",
             "-N", prefix_job_name,
@@ -25,6 +25,5 @@ for i,l in enumerate(L):
             check=True,
             text=True,
             capture_output=False,
-            cwd=out_dir
         )
 
