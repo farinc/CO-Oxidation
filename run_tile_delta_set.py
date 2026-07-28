@@ -12,7 +12,7 @@ for i,l in enumerate(L):
             "qsub",
             "-N", prefix_job_name,
             "-pe", "orte", "24",
-            "/submit_sweep_job.sh",
+            "submit_sweep_job.sh",
             "--out", prefix_job_name,
             "--no-kmc",
             "--no-meanfield",
