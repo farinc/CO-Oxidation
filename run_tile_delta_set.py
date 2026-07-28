@@ -13,7 +13,7 @@ for i,l in enumerate(L):
             "-N", prefix_job_name,
             "-pe", "orte", "24",
             "submit_sweep_job.sh",
-            "--out", f"{out_dir}{prefix_job_name}",
+            "--out", out_dir.joinpath(prefix_job_name),
             "--no-kmc",
             "--no-meanfield",
             "--memkm-sites", f"{l}",
