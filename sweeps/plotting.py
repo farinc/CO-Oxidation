@@ -19,15 +19,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from co_oxidation import meanfield
 
-sns.set_theme(style="whitegrid")
+sns.set_theme(style="white", context="talk")
 
 # The mean-field branches are computed by the sweep's mean-field phase
 # (sweeps._common.run_meanfield); this module only draws them.
-from sweeps._common import (DELTA_SCALE, MEANFIELD_MODELS, build_meanfield_betas,
-                            run_meanfield)
+from sweeps._common import (
+    DELTA_SCALE,
+    MEANFIELD_MODELS,
+    build_meanfield_betas,
+    run_meanfield,
+)
+
 MODEL_LABELS = {"mf": "MF-MK", "ea": "Ea-MK"}
 MODEL_COLORS = {"mf": None, "ea": "green"}
 
@@ -59,10 +65,15 @@ def plot_bifurcation(branches, sweep, path):
 
     `branches` is the mean-field dataframe (as written to {out}_meanfield.csv);
     pass None to draw only the kMC scatter points, e.g. when the mean-field
-    phase was skipped with --no-meanfield.
+    phase was skipped with --no-meanfield. When the sweep carries the ME-MKM
+    columns, the coverages conditioned on the two spectral macrostates are drawn
+    as well: they are the master-equation counterpart of the kMC hysteresis
+    branches, computed from a single ergodic steady state rather than from two
+    initial conditions.
     """
     L = int(sweep["L"].iloc[0])
-    fig, axes = plt.subplots(2, 1, figsize=(7, 8), sharex=True)
+    fig, axes = plt.subplots(2, 1, figsize=(8, 9), sharex=True,
+                             layout="constrained")
     for ax, col, ylabel in ((axes[0], "theta_co", r"$\theta_{CO}$"),
                             (axes[1], "theta_o", r"$\theta_O$")):
         if branches is not None:
@@ -82,14 +93,21 @@ def plot_bifurcation(branches, sweep, path):
                   label="kMC (CO-covered start)")
         ax.scatter(sweep["beta"], sweep[f"{key}_empty"], marker="s", zorder=5,
                   label="kMC (empty start)")
+        for basin, style in (("A", "-"), ("B", "--")):
+            memkm_col = f"memkm_{key}_{basin}"
+            if memkm_col not in sweep.columns:
+                continue
+            branch = sweep.dropna(subset=[memkm_col]).sort_values("beta")
+            if branch.empty:
+                continue
+            ax.plot(branch["beta"], branch[memkm_col], style, color="0.2",
+                    lw=1.4, zorder=4, label=f"ME-MKM basin {basin}")
         ax.set_ylabel(ylabel)
         ax.set_ylim(-0.02, 1.02)
-    axes[0].legend(fontsize=8, ncol=3, loc="lower center",
-                  bbox_to_anchor=(0.5, 1.02))
     axes[-1].set_xlabel(r"$\beta$ (O$_2$ impingement rate, s$^{-1}$)")
-    fig.suptitle(f"CO oxidation bifurcation diagram (L={L})", y=1.08)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150, bbox_inches="tight")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, fontsize=9, ncol=3, loc="outside upper center")
+    fig.savefig(path, dpi=150)
     plt.close(fig)
 
 
@@ -137,39 +155,48 @@ def plot_trajectory(traj, path):
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-def plot_coexistence(arrays, betas, log_ratios, out_prefix, tag=""):
+def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     """The ME-MKM spectral diagnostics at one coexistence point beta*, from the
     in-memory report arrays (see CoexistencePipeline.report). Writes several
-    {out_prefix}_coexistence{tag}_*.png figures. `betas`/`log_ratios` are the
-    full sweep, drawn as the basin-weight ratio curve."""
+    {out_prefix}_coexistence{tag}_*.png figures. `betas`/`cols` are the full
+    sweep (the MEMKM_COLS dict), drawn as the basin-weight ratio curve and the
+    partition-validity continuity panel."""
     beta_star = arrays["beta_star"]
     eigvals = arrays["eigvals"]
     phi_slow = arrays["phi_slow"]
     phi2 = arrays["phi2"]
     theta = arrays["theta"]
-    q_plus = arrays["q_plus"]
     phi_coord = arrays["phi_coord"]
     in_A, in_B = arrays["in_A"], arrays["in_B"]
     species = arrays["order_species"]
+    log_ratios = cols["log_ratio"]
     palette = sns.color_palette("deep")
     K = len(eigvals)
 
     # 1. Eigenvalue spectrum (real / imaginary).
+    eig_labels = [rf"$\lambda_{{{i}}}$" for i in range(K)]
     fig, axes = plt.subplots(1, 2, sharex=True)
     fig.suptitle(rf"Eigenvalues of $W$ at $\beta^*$ = {beta_star:.4g}")
-    axes[0].bar(np.arange(K), eigvals.real)
-    axes[0].set_title("Real Component")
-    axes[1].bar(np.arange(K), eigvals.imag)
-    axes[1].set_title("Imaginary Component")
+    bars_real = axes[0].bar(np.arange(K), eigvals.real)
+    axes[0].set_title("Real Component", fontsize=14)
+    bars_imag = axes[1].bar(np.arange(K), eigvals.imag)
+    axes[1].set_title("Imaginary Component", fontsize=14)
+    for ax, bars, vals in zip(axes, [bars_real, bars_imag],
+                              [eigvals.real, eigvals.imag]):
+        ax.set_yscale('log')
+        ax.axhline(0, color='k', label='_')
+        ax.bar_label(bars, labels=eig_labels, rotation=90, fontsize=10, padding=3)
+        lo, hi = vals.min(), vals.max()
+        pad = 0.18 * max(hi - lo, 1e-9)
+        ax.set_ylim(min(0.0, lo) - pad, max(0.0, hi) + pad)
+    fig.tight_layout()
     fig.savefig(f"{out_prefix}_coexistence{tag}_eigenvalues.png", dpi=150,
                 bbox_inches="tight")
     plt.close(fig)
 
-    # 2. Prinz-style panel: the four slowest left eigenvectors over the two
-    #    basins, each basin stretched to equal axis width.
     idx_A, idx_B = np.where(in_A)[0], np.where(in_B)[0]
-    idx_A = idx_A[np.argsort(-phi2[idx_A])]
-    idx_B = idx_B[np.argsort(-phi2[idx_B])]
+    idx_A = idx_A[np.argsort(phi2[idx_A])]
+    idx_B = idx_B[np.argsort(phi2[idx_B])]
     state_order = np.concatenate([idx_A, idx_B])
     x = np.concatenate([
         np.linspace(0.0, 1.0, len(idx_A), endpoint=False),
@@ -195,7 +222,7 @@ def plot_coexistence(arrays, betas, log_ratios, out_prefix, tag=""):
             ax.plot(x_seg, psi_seg, lw=0.9, color=palette[m],
                     marker="o" if len(x_seg) < 20 else None, ms=4)
         ax.axhline(0.0, color="0.8", lw=0.8)
-        ax.set_ylabel(rf"$\psi_{m + 1}^L$")
+        ax.set_ylabel(rf"$\phi_{m + 1}^L$")
         label = rf"$\lambda_{m + 1}$ = {lam.real:.3e}"
         if abs(lam.imag) > 1e-8 * max(abs(lam.real), 1e-300):
             label += rf" (Im = {lam.imag:.1e}!)"
@@ -234,37 +261,116 @@ def plot_coexistence(arrays, betas, log_ratios, out_prefix, tag=""):
                 bbox_inches="tight")
     plt.close(fig)
 
-    # 5. Slow mode vs. forward committor (affine collapse = two-state kinetics).
-    fig, ax = plt.subplots()
-    ax.scatter(q_plus, phi_coord, s=6, alpha=0.4, color=palette[0],
-               edgecolors="none")
-    ax.set_xlabel(r"forward committor $q^+$")
-    ax.set_ylabel(r"slow coordinate $\phi_2^L$")
-    fig.suptitle(rf"Slow mode vs. committor at $\beta^*$ = {beta_star:.4g}")
-    fig.savefig(f"{out_prefix}_coexistence{tag}_committor.png", dpi=150,
-                bbox_inches="tight")
-    plt.close(fig)
-
-    # 6. Basin-weight ratio curve over the sweep, marking beta*.
+    # 5. Basin-weight curves over the sweep, marking beta*: the objective
+    #    log10 pi(A)/pi(B) and the weights themselves, whose crossing at 1/2 is
+    #    the coexistence definition.
     betas = np.asarray(betas, float)
     log_ratios = np.asarray(log_ratios, float)
     good = np.isfinite(log_ratios)
-    fig, ax = plt.subplots()
-    ax.plot(betas[good], log_ratios[good], "-o", color=palette[0])
-    ax.axhline(0.0, color="0.6", lw=1)
-    ax.axvline(beta_star, color="0.6", lw=1, ls="--")
-    ax.annotate(rf"$\beta^*$ = {beta_star:.4g}", (beta_star, 0.0),
-                textcoords="offset points", xytext=(8, 8))
-    ax.set_xlabel(r"$\beta$")
-    ax.set_ylabel(r"$\log_{10}\,\pi(A)/\pi(B)$")
-    fig.suptitle("Basin-weight ratio vs. adsorption rate")
+    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(7, 7))
+    axes[0].plot(betas[good], log_ratios[good], "-o", color=palette[0])
+    axes[0].axhline(0.0, color="0.6", lw=1)
+    axes[0].annotate(rf"$\beta^*$ = {beta_star:.4g}", (beta_star, 0.0),
+                     textcoords="offset points", xytext=(8, 8))
+    axes[0].set_ylabel(r"$\log_{10}\,p_{ss}(A)/p_{ss}(B)$")
+    P_A = np.asarray(cols["memkm_P_A"], float)
+    ok = np.isfinite(P_A)
+    axes[1].plot(betas[ok], P_A[ok], "-o", color=palette[0], label=r"$P_A$")
+    axes[1].plot(betas[ok], 1.0 - P_A[ok], "-o", color=palette[1], label=r"$P_B$")
+    axes[1].axhline(0.5, color="0.6", lw=1)
+    axes[1].set_ylabel("spectral macrostate weight")
+    axes[1].set_ylim(-0.02, 1.02)
+    axes[1].legend(fontsize=8)
+    for ax in axes:
+        ax.axvline(beta_star, color="0.6", lw=1, ls="--")
+    axes[-1].set_xlabel(r"$\beta$")
+    fig.suptitle("Spectral macrostate weights vs. adsorption rate")
+    fig.tight_layout()
     fig.savefig(f"{out_prefix}_coexistence{tag}_ratio-curve.png", dpi=150,
                 bbox_inches="tight")
     plt.close(fig)
 
+    # 6. Continuity / validity of the partition across the sweep.
+    plot_partition_diagnostics(betas, cols, beta_star, out_prefix, tag=tag)
+
     # 7. Coverage-class map over (N_CO, N_O).
     if "cov_pop" in arrays:
         plot_coverage_map(arrays, out_prefix, tag=tag)
+
+
+def plot_partition_diagnostics(betas, cols, beta_star, out_prefix, tag=""):
+    """Whether the two-state reading actually holds across the sweep, from the
+    per-beta MEMKM_COLS: the two slowest eigenvalues and their gap, the
+    stationary mass sitting on the sign boundary, the overlap of consecutive
+    slow modes, and the conditional coverages of the two macrostates."""
+    betas = np.asarray(betas, float)
+    palette = sns.color_palette("deep")
+
+    def finite(key):
+        y = np.asarray(cols[key], float)
+        m = np.isfinite(y)
+        return betas[m], y[m]
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7.5), sharex=True)
+    ax = axes[0, 0]
+    for key, label, color in (("lambda2_re", r"$|\mathrm{Re}\,\lambda_2|$", 0),
+                              ("lambda3_re", r"$|\mathrm{Re}\,\lambda_3|$", 1)):
+        x, y = finite(key)
+        ax.plot(x, np.abs(y), "-o", ms=3, color=palette[color], label=label)
+    ax.set_yscale("log")
+    ax.set_ylabel("relaxation rate, s$^{-1}$")
+    ax.legend(fontsize=8)
+
+    ax = axes[0, 1]
+    x, y = finite("spectral_gap")
+    ax.plot(x, y, "-o", ms=3, color=palette[0])
+    ax.axhline(1.0, color="0.6", lw=1)
+    ax.set_yscale("log")
+    ax.set_ylabel(r"gap $|\mathrm{Re}\,\lambda_3 / \mathrm{Re}\,\lambda_2|$")
+    ax.set_title("large = one slow process controls the split", fontsize=9)
+
+    # Exact zeros are common and meaningful here (no ambiguous weight at all, a
+    # perfectly continued mode), so they are drawn on the floor of the log axis
+    # rather than dropped, and the floor is set a decade under the smallest
+    # positive value so the informative range keeps the height of the panel.
+    def _floored(y, default=1e-12):
+        positive = y[y > 0.0]
+        floor = positive.min() / 10.0 if positive.size else default
+        return np.maximum(y, floor), floor
+
+    ax = axes[1, 0]
+    x, y = finite("boundary_mass")
+    y, floor = _floored(y)
+    ax.plot(x, y, "-o", ms=3, color=palette[0])
+    ax.set_yscale("log")
+    ax.set_ylim(bottom=floor / 2)
+    ax.set_ylabel(r"$P_\mathrm{boundary}$")
+    ax.set_xlabel(r"$\beta$")
+    im_re = np.asarray(cols["im_re_ratio"], float)
+    worst = np.nanmax(im_re) if np.isfinite(im_re).any() else np.nan
+    ax.set_title(rf"max $|\mathrm{{Im}}\,\lambda_2/\mathrm{{Re}}\,\lambda_2|$ = "
+                 rf"{worst:.1e} (real mode required)", fontsize=9)
+
+    # Plotted as 1 - overlap: the overlaps themselves sit at 0.9999... where a
+    # linear axis resolves nothing. A sign flip shows up as a value near 2.
+    ax = axes[1, 1]
+    x, y = finite("mode_overlap")
+    y, floor = _floored(1.0 - y)
+    ax.plot(x, y, "-o", ms=3, color=palette[0])
+    ax.set_yscale("log")
+    ax.set_ylim(bottom=floor / 2)
+    ax.set_ylabel(r"$1-\langle \phi_2^R(\beta_k), \phi_2^R(\beta_{k-1})\rangle$")
+    ax.set_xlabel(r"$\beta$")
+    ax.set_title("spike (or a value near 2, a sign flip) = mode crossing",
+                 fontsize=9)
+
+    for ax in axes.ravel():
+        ax.axvline(beta_star, color="0.6", lw=1, ls="--")
+    fig.suptitle("Validity of the spectral two-state partition")
+    fig.tight_layout()
+    fig.savefig(f"{out_prefix}_coexistence{tag}_partition-diagnostics.png",
+                dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _coverage_pcolor(ax, grid, l, cmap, norm=None, vmin=None, vmax=None):
@@ -287,14 +393,21 @@ def _coverage_pcolor(ax, grid, l, cmap, norm=None, vmin=None, vmax=None):
     return im
 
 
+def _inset_colorbar(fig, ax, im, label=None):
+    """A colorbar sized to match its axes instead of the fig.colorbar(shrink=)
+    hack -- see https://joseph-long.com/writing/colorbars/."""
+    cax = make_axes_locatable(ax).append_axes("right", size="5%", pad=0.08)
+    return fig.colorbar(im, cax=cax, label=label)
+
+
 def plot_coverage_map(arrays, out_prefix, tag=""):
     """Coverage-class maps over the (N_CO, N_O) plane at beta*, in two figures:
 
       {..}_coverage-population.png : the stationary marginal log10 sum_i pi_i,
         which states are populated (the two basins + transition valley),
-      {..}_coverage-reaction.png  : the pi-weighted slow mode <phi_2^L> and the
-        pi-weighted forward committor <q+> side by side -- they tell the same
-        two-state story (phi_2^L is ~ affine in q+), so they are grouped.
+      {..}_coverage-reaction.png  : the slow right mode sum phi_^_2 (whose *sign*
+        is the macrostate partition), the pi-weighted slow left mode
+        <phi_2^L>.
 
     Cells are centered on integer (N_CO, N_O); the inaccessible corner
     (N_CO + N_O > l) and empty classes are masked."""
@@ -304,55 +417,42 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
     l = arrays["n_sites"]
     pop = arrays["cov_pop"]
     phi = arrays["cov_phi"]
-    qmap = arrays["cov_q"]     # standard TPT q+ : 0 on core A, 1 on core B
+    r2map = arrays["cov_r2"]   # class sums of r_2 / max|r_2|; sign = partition
 
     deg = arrays["cov_deg"]
     a = np.arange(l + 1)
     outside = (a[:, None] + a[None, :]) > l
-    logpop = np.where((pop > 0) & ~outside, np.log10(np.where(pop > 0, pop, 1)),
-                      np.nan)
-    # Per-microstate mean weight = population / degeneracy: strips the
-    # combinatorial class-size factor to show the intrinsic per-config preference.
-    perstate = np.where((pop > 0) & (deg > 0), pop / np.where(deg > 0, deg, 1),
-                        np.nan)
-    logperstate = np.where((perstate > 0) & ~outside,
-                           np.log10(np.where(perstate > 0, perstate, 1)), np.nan)
+    logpop = np.where((pop > 0) & ~outside, np.log(np.where(pop > 0, pop, 1)),np.nan)
+    empty = outside | (deg <= 0)
     phi_m = np.where(outside, np.nan, phi)
-    q_m = np.where(outside, np.nan, qmap)
+    r2_m = np.where(empty, np.nan, r2map)
 
     # Figure 1: stationary population, with the degeneracy-corrected view beside it.
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5), constrained_layout=True)
+    fig, axes = plt.subplots(1, 1, figsize=(12, 5.5), constrained_layout=True)
     im0 = _coverage_pcolor(axes[0], logpop, l, "viridis")
-    axes[0].set_title(r"Distribution of Microstates $\sum_i \pi_i$")
-    fig.colorbar(im0, ax=axes[0], label=r"$\log_{10}\sum_i \pi_i$", shrink=0.85)
-    im1 = _coverage_pcolor(axes[1], logperstate, l, "viridis")
-    axes[1].set_title(r"Normalized Distribution of Microstates $(\sum_i \pi_i) / g$")
-    fig.colorbar(im1, ax=axes[1], label=r"$\log_{10}(\sum_i \pi_i / g)$",
-                 shrink=0.85)
+    axes[0].set_title(r"Distribution of Microstates")
+    _inset_colorbar(fig, axes[0], im0)
     fig.suptitle(rf"Coverage-class population at $\beta^*$ = {beta_star:.4g}")
     fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-population.png",
                 dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    # Figure 2: slow mode + committor together (the reaction coordinate).
-    finite = np.isfinite(phi_m)
-    if finite.any() and np.nanmin(phi_m) < 0 < np.nanmax(phi_m):
-        phi_norm = TwoSlopeNorm(vcenter=0.0, vmin=np.nanmin(phi_m),
-                                vmax=np.nanmax(phi_m))
-    else:
-        phi_norm = None
+    # Figure 2: the partition (r_2) and the reaction coordinate (phi_2^L),
+    # which should both place the dividing surface in the same place.
+    def _diverging(grid, center=0.0):
+        if np.isfinite(grid).any() and np.nanmin(grid) < 0 < np.nanmax(grid):
+            return TwoSlopeNorm(vcenter=center, vmin=np.nanmin(grid),
+                                vmax=np.nanmax(grid))
+        return None
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5), constrained_layout=True)
-    im0 = _coverage_pcolor(axes[0], phi_m, l, "coolwarm", norm=phi_norm)
-    axes[0].set_title(r"slow mode $\langle\phi_2^L\rangle_\pi$")
-    fig.colorbar(im0, ax=axes[0], shrink=0.85)
-    sp_a = arrays.get("species_A", "A")
-    sp_b = arrays.get("species_B", "B")
-    im1 = _coverage_pcolor(axes[1], q_m, l, "Blues", vmin=0.0, vmax=1.0)
-    axes[1].set_title(rf"forward committor $\langle q^+\rangle_\pi$  "
-                      rf"(0 = {sp_a}-core A, 1 = {sp_b}-core B)")
-    fig.colorbar(im1, ax=axes[1], label=r"$\langle q^+\rangle_\pi$", shrink=0.85)
-    fig.suptitle(rf"Reaction coordinate in coverage space at "
+    fig, axes = plt.subplots(1, 2, figsize=(17, 5.5), constrained_layout=True)
+    im0 = _coverage_pcolor(axes[0], r2_m, l, "coolwarm", norm=_diverging(r2_m))
+    axes[0].set_title(r"Slowest Relaxation Mode $\phi_2^R(n_\mathrm{CO},n_\mathrm{O})$")
+    _inset_colorbar(fig, axes[0], im0)
+    im1 = _coverage_pcolor(axes[1], phi_m, l, "coolwarm", norm=_diverging(phi_m))
+    axes[1].set_title(r"Reaction Coordinate $\phi_2^L(n_\mathrm{CO},n_\mathrm{O})$")
+    _inset_colorbar(fig, axes[1], im1)
+    fig.suptitle(rf"Partition and reaction coordinate in coverage space at "
                  rf"$\beta^*$ = {beta_star:.4g}")
     fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-reaction.png",
                 dpi=150, bbox_inches="tight")

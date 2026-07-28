@@ -1,5 +1,5 @@
 # CO oxidation
-Features a number of kMC, mean field, and (soon) ME-MKM kinetic models for CO oxidation following the model of [Tian & Rangarajan, *J. Phys. Chem. C* 2021, 125, 20275](https://doi.org/10.1021/acs.jpcc.1c04495)
+Features a number of kMC, mean field, and ME-MKM kinetic models for CO oxidation following the model of [Tian & Rangarajan, *J. Phys. Chem. C* 2021, 125, 20275](https://doi.org/10.1021/acs.jpcc.1c04495)
 
 ## Model
 $$\begin{aligned}
@@ -70,14 +70,16 @@ phases** and write their output files (default prefix `co_oxidation`):
 
 - **kMC sweep** (`--no-kmc` to skip) &rarr; `{out}_kmc_sweep.csv`: per-beta kMC
   steady coverages from the empty and CO-covered starts. When ME-MKM is on,
-  its steady coverages (`memkm_empty/co/o`) and the basin-weight ratio
-  `log10 pi(A)/pi(B)` (`log_ratio`) are attached to the same file.
+  its steady coverages (`memkm_empty/co/o`), the basin-weight ratio
+  `log10 pi(A)/pi(B)` (`log_ratio`), the coverages conditioned on each basin
+  (`memkm_co_A`, `memkm_o_A`, `memkm_co_B`, `memkm_o_B` -- the master-equation
+  counterpart of the kMC hysteresis branches) and the partition diagnostics
+  below are attached to the same file.
 - **ME-MKM coexistence** (`--memkm`/`--no-memkm`; **off by default** in
   `sweeps/linear.py` -- even a small tile is too slow for a laptop, **on by
   default** in `sweeps/mpi.py`) &rarr; `{out}_coexistence.csv`: for each
   beta\* where `log_ratio` changes sign (Brent-refined), the slow
-  eigenvalues, the committor-based basin transition rates `k_AB`, `k_BA`, the
-  reactive flux, and two-state-kinetics diagnostics. Needs the
+  eigenvalues and two-state-kinetics diagnostics. Needs the
   `native-petsc`+`native-slepc` or `source-petsc`+`source-slepc` extras.
 - **Mean field** (`--no-meanfield` to skip) &rarr; `{out}_meanfield.csv`: the
   MF-MK and Ea-MK steady-state branches, computed on a filled-in beta grid that
@@ -133,4 +135,6 @@ from co_oxidation.memkm import generate_model, CoexistencePipeline
 tile = TileSettings.smallest_valid_square(8, True)  # 8-site ME-MKM tile
 pipeline = CoexistencePipeline(tile)
 log_ratio = pipeline.basin_log_ratio(beta=5.0)       # log10 pi(A)/pi(B)
+checks = pipeline.diagnostics(beta=5.0)              # is it really two-state?
+row, arrays = pipeline.report(beta_star)             # full analysis at beta*
 ```

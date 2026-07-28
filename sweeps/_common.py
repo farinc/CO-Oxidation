@@ -21,8 +21,14 @@ TAGS = ("empty", "full")
 # different delta and stop being comparable.
 DELTA_SCALE = 1e-4
 
-# ME-MKM sweep columns added alongside the kMC coverages in {out}_kmc_sweep.csv.
-MEMKM_COLS = ("memkm_empty", "memkm_co", "memkm_o", "log_ratio")
+# ME-MKM sweep columns added alongside the kMC coverages in {out}_kmc_sweep.csv:
+# the mean coverages, the coexistence objective log10 pi(A)/pi(B) and the
+# per-beta continuity/validity diagnostics of the spectral two-state partition
+# (see co_oxidation.memkm.coexistence.CoexistencePipeline.diagnostics).
+MEMKM_COLS = ("memkm_empty", "memkm_co", "memkm_o", "log_ratio", "memkm_P_A",
+              "memkm_co_A", "memkm_o_A", "memkm_co_B", "memkm_o_B",
+              "lambda2_re", "lambda3_re", "spectral_gap", "im_re_ratio",
+              "boundary_mass", "mode_overlap")
 
 # The two mean-field rate laws (MF-MK and Ea-MK in Tian & Rangarajan 2021).
 MEANFIELD_MODELS = ("mf", "ea")
@@ -41,16 +47,16 @@ def delta_scale_of(args):
 def physics_from_args(args):
     """Full shared chemistry as generate_model / KMCParams keywords: the same
     values feed the kMC model and the ME-MKM generator."""
-    return dict(alpha=args.alpha, gamma=args.gamma, kr=args.kr,
-                khop_scale=args.khop_scale, eps=args.eps,
-                temperature=args.temperature)
+    return {"alpha": args.alpha, "gamma": args.gamma, "kr": args.kr,
+                "khop_scale": args.khop_scale, "eps": args.eps,
+                "temperature": args.temperature}
 
 
 def meanfield_physics_from_args(args):
     """Mean-field subset of the shared chemistry (no diffusion, so khop_scale
     is dropped) for run_meanfield and the rate figure."""
-    return dict(alpha=args.alpha, gamma=args.gamma, kr=args.kr,
-                eps=args.eps, temperature=args.temperature)
+    return {"alpha": args.alpha, "gamma": args.gamma, "kr": args.kr,
+                "eps": args.eps, "temperature": args.temperature}
 
 
 def build_tasks(betas, seed):
@@ -164,8 +170,9 @@ def build_tile(args):
 
 
 def run_coexistence(betas, tile, args, comm=None):
-    """ME-MKM phase: per-beta coverages + basin log-ratio, then Brent-refined
-    coexistence point(s) with the full spectral/committor/TPT report at each.
+    """ME-MKM phase: per-beta coverages, the spectral basin log-ratio and its
+    validity diagnostics, then Brent-refined coexistence point(s) with the full
+    spectral report at each.
 
     Collective across `comm` (an mpi4py communicator or None): every rank runs
     the identical Brent search in lockstep because each objective evaluation is
@@ -176,20 +183,26 @@ def run_coexistence(betas, tile, args, comm=None):
       - report_arrays: the matching per-beta* arrays for plotting.
     """
     from co_oxidation.memkm import CoexistencePipeline
+    from co_oxidation.memkm.coexistence import IM_RE_TOL
 
     rank = comm.Get_rank() if comm is not None else 0
     pipe = CoexistencePipeline(
         tile, comm=comm, order_species=args.memkm_order_species,
-        core_frac=args.memkm_core_frac, factor=args.memkm_factor_solver,
+        n_eigs_scan=args.memkm_n_eigs_scan,
+        boundary_eps=args.memkm_boundary_eps, factor=args.memkm_factor_solver,
         delta_scale=delta_scale_of(args), **physics_from_args(args))
 
     n = len(betas)
     cols = {key: np.full(n, np.nan) for key in MEMKM_COLS}
+    prev = None            # (beta, r_2) of the last beta that solved
     for i, b in enumerate(betas):
         b = float(b)
         try:
             lr = pipe.basin_log_ratio(b)
             cov = pipe.coverages(b)
+            basin_cov = pipe.basin_coverages(b)
+            diag = pipe.diagnostics(b)
+            r2 = pipe.slow_mode(b)
         except Exception as exc:  # deterministic across ranks -> lockstep safe
             if rank == 0:
                 print(f"  [memkm] beta={b:.4g}: solve skipped ({exc})", flush=True)
@@ -198,9 +211,33 @@ def run_coexistence(betas, tile, args, comm=None):
         cols["memkm_empty"][i] = cov["empty"]
         cols["memkm_co"][i] = cov["co"]
         cols["memkm_o"][i] = cov["o"]
+        cols["memkm_P_A"][i] = pipe.basin_weights(b)[0]
+        for key in ("co_A", "o_A", "co_B", "o_B"):
+            cols[f"memkm_{key}"][i] = basin_cov[key]
+        for key in ("lambda2_re", "lambda3_re", "spectral_gap", "im_re_ratio",
+                    "boundary_mass"):
+            cols[key][i] = diag[key]
+        # Continuation check: the normalized overlap of consecutive slow modes.
+        # Near 1 means the sweep is still following the same physical process;
+        # a collapse (or a sign flip, since the mode is oriented by coverage
+        # rather than by continuity) marks a mode crossing, so the two sides of
+        # such a beta are not comparable.
+        if prev is not None:
+            r2_prev = prev[1]
+            cols["mode_overlap"][i] = float(
+                r2 @ r2_prev / (np.linalg.norm(r2) * np.linalg.norm(r2_prev)))
+        prev = (b, r2)
+
         if rank == 0:
+            warn = ""
+            if diag["im_re_ratio"] > IM_RE_TOL:
+                warn += "  [!] complex slow pair: sign partition undefined"
+            if diag["spectral_gap"] < 2.0:
+                warn += "  [!] no spectral gap: not a two-state regime"
             print(f"  [memkm] beta={b:5.3f}  theta_CO={cov['co']:.3f} "
-                  f"theta_O={cov['o']:.3f}  log10(A/B)={lr:+.3f}", flush=True)
+                  f"theta_O={cov['o']:.3f}  log10(A/B)={lr:+.3f}  "
+                  f"gap={diag['spectral_gap']:.2f}  "
+                  f"boundary={diag['boundary_mass']:.2e}{warn}", flush=True)
 
     stars = pipe.find_coexistence(betas, cols["log_ratio"], xtol=args.memkm_brent_xtol)
     if rank == 0:
@@ -213,8 +250,17 @@ def run_coexistence(betas, tile, args, comm=None):
         rows.append(row)
         arrays.append(arr)
         if rank == 0:
-            print(f"  [memkm] beta*={bstar:.6g}  k(A->B)={row['k_AB']:.4e}  "
-                  f"k(B->A)={row['k_BA']:.4e}  F={row['flux_F']:.4e}", flush=True)
+            print(f"  [memkm] beta*={bstar:.6g}  P_A={row['P_A']:.4f} "
+                  f"P_B={row['P_B']:.4f} (residual log10 A/B = "
+                  f"{row['log_ratio']:+.2e})", flush=True)
+            print(f"  [memkm]   basin A: theta_CO={row['co_A']:.3f} "
+                  f"theta_O={row['o_A']:.3f} ({row['n_A']} states) | "
+                  f"basin B: theta_CO={row['co_B']:.3f} "
+                  f"theta_O={row['o_B']:.3f} ({row['n_B']} states)", flush=True)
+            print(f"  [memkm]   gap={row['spectral_gap']:.2f}  "
+                  f"boundary mass={row['boundary_mass']:.2e}  "
+                  f"sign agreement (r_2 vs phi_2^L)={row['sign_agreement']:.4f}",
+                  flush=True)
     return cols, rows, arrays
 
 
@@ -306,20 +352,28 @@ def build_argparser(description, memkm_default=True):
                        help="ME-MKM tile site count (smallest valid square tile)")
     memkm.add_argument("--memkm-order-species", "--order-species",
                        dest="memkm_order_species", default="CO",
-                       help="species whose coverage orients the slow eigenvector "
-                            "(fixes which branch is 'basin A')")
-    memkm.add_argument("--memkm-core-frac", "--core-frac", dest="memkm_core_frac",
-                       type=float, default=0.1,
-                       help="coverage tolerance defining the committor's basin "
-                            "cores: a core is the states within core_frac of a "
-                            "full monolayer of its species (must be < 0.5). Keep "
-                            "it small: widening the cores pulls transition-region "
-                            "states into the basins and inflates the rates -- "
-                            "check (k_AB+k_BA)/|lambda_2| stays near 1")
+                       help="species whose coverage orients the slow eigenvector. "
+                            "The eigenvector's overall sign is arbitrary and only "
+                            "swaps the two macrostate labels, so this pins basin A "
+                            "to the branch rich in this species at every beta")
+    memkm.add_argument("--memkm-n-eigs-scan", "--n-eigs-scan",
+                       dest="memkm_n_eigs_scan", type=int, default=4,
+                       help="right eigenpairs solved at every sweep beta (>= 3: "
+                            "the stationary mode, the slow mode whose sign is the "
+                            "basin partition, and lambda_3 for the spectral gap)")
+    memkm.add_argument("--memkm-boundary-eps", "--boundary-eps",
+                       dest="memkm_boundary_eps", type=float, default=0.1,
+                       help="how close to a plateau of the slow coordinate a "
+                            "state must be to count as firmly assigned, as a "
+                            "fraction of the plateau separation (must be < 0.5). "
+                            "The boundary_mass diagnostic is the stationary "
+                            "weight on neither plateau; a large value means the "
+                            "hard partition (and so beta*) is sensitive to small "
+                            "numerical or model changes")
     memkm.add_argument("--memkm-n-eigs", "--n-eigs-report", dest="memkm_n_eigs",
                        type=int, default=20,
-                       help="left eigenpairs solved at each coexistence point "
-                            "(the sweep/Brent inner loop needs no eigensolve)")
+                       help="left eigenpairs solved at each coexistence point, for "
+                            "the reaction-coordinate diagnostics only")
     memkm.add_argument("--memkm-brent-xtol", "--brent-xtol",
                        dest="memkm_brent_xtol", type=float, default=1e-5,
                        help="Brent tolerance on (log-)beta for beta*")
@@ -373,7 +427,7 @@ def maybe_plot_coexistence(cols, rows, arrays, betas, out_prefix):
         return
     for i, arr in enumerate(arrays):
         tag = "" if len(arrays) == 1 else f"-{i}"
-        plot_coexistence(arr, betas, cols["log_ratio"], out_prefix, tag=tag)
+        plot_coexistence(arr, betas, cols, out_prefix, tag=tag)
     print(f"  [plot] wrote spectral diagnostics for {len(arrays)} "
           f"coexistence point(s)")
 

@@ -1,4 +1,4 @@
-from me_mkm import BepInteraction, InitialStateInteraction, MEMKMBuilder, Reaction
+from me_mkm import BepBarrierModel, FrozenTransitionStateBarrier, MEMKMBuilder, Reaction
 from ..common import EMPTY, CO, O
 
 def generate_model(beta, tile, delta_scale=1e-4, alpha=1.6, gamma=1e-3, kr=1.0,
@@ -36,8 +36,8 @@ def generate_model(beta, tile, delta_scale=1e-4, alpha=1.6, gamma=1e-3, kr=1.0,
         [0, -eps , 0],
         [0, 0,   0]
     ]
-    lateral = InitialStateInteraction(interaction_matrix, kbt=RT)
-    co_hop  = BepInteraction(interaction_matrix, 0.5, kbt=RT)
+    lateral = FrozenTransitionStateBarrier(interaction_matrix, kbt=RT)
+    co_hop  = BepBarrierModel(interaction_matrix, 0.5, kbt=RT)
 
     # Define the reactions
     reactions = [
