@@ -297,9 +297,9 @@ class CoexistencePipeline:
         for c in crossings:
             lo, hi = b[c], b[c + 1]
             if lo > 0.0 and hi > 0.0:   # refine in log-beta like the reference
-                log_star = brentq(lambda lb: self.basin_log_ratio(10.0 ** lb),
+                log_star = brentq(lambda lb: self.basin_log_ratio(np.exp(lb)),
                                   np.log(lo), np.log(hi), xtol=xtol)
-                stars.append(10.0 ** log_star)
+                stars.append(np.exp(log_star))
             else:
                 stars.append(brentq(self.basin_log_ratio, lo, hi, xtol=xtol))
         return sorted(stars)
