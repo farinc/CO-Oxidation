@@ -5,8 +5,8 @@ L = [8, 10, 12]
 Delta_scale = [1, 0.1, 0.01, 0.001, 0.0001, 0.00001]
 out_dir = Path('output/')
 
-for i,l in enumerate(L):
-    for delta_scale in Delta_scale:
+for l in L:
+    for i,delta_scale in enumerate(Delta_scale):
         prefix_job_name = f"tile_{l}_delta{i}"
         command = [
             "qsub",
