@@ -195,7 +195,7 @@ class CoexistencePipeline:
         return float(theta[s["in_A"]].sum()), float(theta[s["in_B"]].sum())
 
     def basin_log_ratio(self, beta):
-        """log10 pi(A)/pi(B): the coexistence objective, zero at beta*."""
+        """ln pi(A)/pi(B): the coexistence objective, zero at beta*."""
         P_A, P_B = self.basin_weights(beta)
         return float(np.log(P_A / P_B))
 
@@ -282,7 +282,7 @@ class CoexistencePipeline:
 
     # --- coexistence search ---------------------------------------------------
     def find_coexistence(self, betas, log_ratios, xtol=1e-5):
-        """Every beta* where log10 pi(A)/pi(B) changes sign across the sweep,
+        """Every beta* where ln pi(A)/pi(B) changes sign across the sweep,
         each Brent-refined. Returns a sorted list of beta* (possibly several,
         but only one should appear)."""
         b = np.asarray(betas, dtype=float)

@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from co_oxidation import meanfield
 
@@ -173,9 +172,17 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     palette = sns.color_palette("deep")
     K = len(eigvals)
 
-    # 1. Eigenvalue spectrum (real / imaginary).
+    # 1. Eigenvalue spectrum (real / imaginary). Re(lambda) <= 0 for every mode
+    # but lambda_1 (the generator has no unstable direction), and most modes
+    # have Im(lambda) = 0 (only the handful of complex-conjugate pairs don't) --
+    # a plain 'log' scale drops every non-positive bar, which is why the old
+    # plot came out empty. symlog keeps the sign (so the negative real parts
+    # still read as negative) while going log-scale away from a linear band
+    # around zero sized to the smallest nonzero |eigenvalue|, so the many
+    # exactly-zero imaginary parts still draw as zero-height bars instead of
+    # disappearing.
     eig_labels = [rf"$\lambda_{{{i}}}$" for i in range(K)]
-    fig, axes = plt.subplots(1, 2, sharex=True)
+    fig, axes = plt.subplots(1, 2, sharex=True, figsize=(max(9.0, 0.4 * K), 5.5))
     fig.suptitle(rf"Eigenvalues of $W$ at $\beta^*$ = {beta_star:.4g}")
     bars_real = axes[0].bar(np.arange(K), eigvals.real)
     axes[0].set_title("Real Component", fontsize=14)
@@ -183,12 +190,31 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     axes[1].set_title("Imaginary Component", fontsize=14)
     for ax, bars, vals in zip(axes, [bars_real, bars_imag],
                               [eigvals.real, eigvals.imag]):
-        ax.set_yscale('log')
+        nonzero_mask = vals != 0.0
+        nonzero = np.abs(vals[nonzero_mask])
+        linthresh = nonzero.min() if nonzero.size else 1.0
+        ax.set_yscale('symlog', linthresh=linthresh)
         ax.axhline(0, color='k', label='_')
-        ax.bar_label(bars, labels=eig_labels, rotation=90, fontsize=10, padding=3)
-        lo, hi = vals.min(), vals.max()
-        pad = 0.18 * max(hi - lo, 1e-9)
-        ax.set_ylim(min(0.0, lo) - pad, max(0.0, hi) + pad)
+        # Exactly-zero bars (every purely real mode, in the imaginary panel)
+        # carry no information beyond "zero" and sit on top of each other at
+        # the axis; label only the bars that actually stick out.
+        labels = [lab if nz else "" for lab, nz in zip(eig_labels, nonzero_mask)]
+        ax.bar_label(bars, labels=labels, rotation=90, fontsize=9, padding=3)
+    # Grow each axis to fit the label text matplotlib actually rendered,
+    # rather than guessing a headroom multiplier by hand: draw once, read
+    # back every label's bounding box in data coordinates, and extend ylim
+    # to cover it. This also keeps the real-component axis pinned at 0 on
+    # the positive side, since nothing (bars or labels) sits above it there.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    for ax in axes:
+        ymin, ymax = ax.get_ylim()
+        for txt in ax.texts:
+            bbox = txt.get_window_extent(renderer=renderer)
+            bbox_data = bbox.transformed(ax.transData.inverted())
+            ymin = min(ymin, bbox_data.y0, bbox_data.y1)
+            ymax = max(ymax, bbox_data.y0, bbox_data.y1)
+        ax.set_ylim(ymin, ymax)
     fig.tight_layout()
     fig.savefig(f"{out_prefix}_coexistence{tag}_eigenvalues.png", dpi=150,
                 bbox_inches="tight")
@@ -250,7 +276,8 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     plt.close(fig)
 
     # 4. Stationary density on the slow coordinate.
-    pmf, edges = np.histogram(phi_coord, bins=50, weights=theta)
+    sort_idx = np.argsort(phi_coord)
+    pmf, edges = np.histogram(phi_coord[sort_idx], bins=50, weights=theta[sort_idx])
     fig, ax = plt.subplots()
     ax.stairs(pmf, edges, fill=True, color=palette[0])
     ax.set_yscale("log")
@@ -262,7 +289,7 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     plt.close(fig)
 
     # 5. Basin-weight curves over the sweep, marking beta*: the objective
-    #    log10 pi(A)/pi(B) and the weights themselves, whose crossing at 1/2 is
+    #    ln pi(A)/pi(B) and the weights themselves, whose crossing at 1/2 is
     #    the coexistence definition.
     betas = np.asarray(betas, float)
     log_ratios = np.asarray(log_ratios, float)
@@ -272,7 +299,7 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     axes[0].axhline(0.0, color="0.6", lw=1)
     axes[0].annotate(rf"$\beta^*$ = {beta_star:.4g}", (beta_star, 0.0),
                      textcoords="offset points", xytext=(8, 8))
-    axes[0].set_ylabel(r"$\log_{10}\,p_{ss}(A)/p_{ss}(B)$")
+    axes[0].set_ylabel(r"$\ln\,p_{ss}(A)/p_{ss}(B)$")
     P_A = np.asarray(cols["memkm_P_A"], float)
     ok = np.isfinite(P_A)
     axes[1].plot(betas[ok], P_A[ok], "-o", color=palette[0], label=r"$P_A$")
@@ -394,10 +421,12 @@ def _coverage_pcolor(ax, grid, l, cmap, norm=None, vmin=None, vmax=None):
 
 
 def _inset_colorbar(fig, ax, im, label=None):
-    """A colorbar sized to match its axes instead of the fig.colorbar(shrink=)
-    hack -- see https://joseph-long.com/writing/colorbars/."""
-    cax = make_axes_locatable(ax).append_axes("right", size="5%", pad=0.08)
-    return fig.colorbar(im, cax=cax, label=label)
+    """A colorbar sized to match its axes. Goes through fig.colorbar(ax=...)
+    rather than the axes_grid1 divider trick, since these figures use
+    constrained_layout=True and the layout engine only reserves space for
+    colorbars it knows about -- an axes_grid1 divider axes is invisible to it
+    and ends up drawn on top of whatever is already there."""
+    return fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=label)
 
 
 def plot_coverage_map(arrays, out_prefix, tag=""):
@@ -428,11 +457,10 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
     r2_m = np.where(empty, np.nan, r2map)
 
     # Figure 1: stationary population, with the degeneracy-corrected view beside it.
-    fig, axes = plt.subplots(1, 1, figsize=(12, 5.5), constrained_layout=True)
-    im0 = _coverage_pcolor(axes[0], logpop, l, "viridis")
-    axes[0].set_title(r"Distribution of Microstates")
-    _inset_colorbar(fig, axes[0], im0)
-    fig.suptitle(rf"Coverage-class population at $\beta^*$ = {beta_star:.4g}")
+    fig, ax = plt.subplots(1, 1, figsize=(12, 5.5), constrained_layout=True)
+    im0 = _coverage_pcolor(ax, logpop, l, "viridis")
+    ax.set_title(rf"Stationary Distribution by Coverage-class at $\beta^*$ = {beta_star:.4g}")
+    _inset_colorbar(fig, ax, im0)
     fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-population.png",
                 dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -445,7 +473,7 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
                                 vmax=np.nanmax(grid))
         return None
 
-    fig, axes = plt.subplots(1, 2, figsize=(17, 5.5), constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5.5), constrained_layout=True)
     im0 = _coverage_pcolor(axes[0], r2_m, l, "coolwarm", norm=_diverging(r2_m))
     axes[0].set_title(r"Slowest Relaxation Mode $\phi_2^R(n_\mathrm{CO},n_\mathrm{O})$")
     _inset_colorbar(fig, axes[0], im0)

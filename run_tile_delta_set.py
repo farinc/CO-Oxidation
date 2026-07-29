@@ -14,8 +14,6 @@ for i,l in enumerate(L):
             "-pe", "orte", "24",
             "submit_sweep_job.sh",
             "--out", out_dir.joinpath(prefix_job_name),
-            "--no-kmc",
-            "--no-meanfield",
             "--memkm-sites", f"{l}",
             "--delta-scale", f"{delta_scale}",
         ]

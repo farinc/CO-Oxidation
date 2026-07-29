@@ -22,7 +22,7 @@ TAGS = ("empty", "full")
 DELTA_SCALE = 1e-4
 
 # ME-MKM sweep columns added alongside the kMC coverages in {out}_kmc_sweep.csv:
-# the mean coverages, the coexistence objective log10 pi(A)/pi(B) and the
+# the mean coverages, the coexistence objective ln pi(A)/pi(B) and the
 # per-beta continuity/validity diagnostics of the spectral two-state partition
 # (see co_oxidation.memkm.coexistence.CoexistencePipeline.diagnostics).
 MEMKM_COLS = ("memkm_empty", "memkm_co", "memkm_o", "log_ratio", "memkm_P_A",
@@ -235,7 +235,7 @@ def run_coexistence(betas, tile, args, comm=None):
             if diag["spectral_gap"] < 2.0:
                 warn += "  [!] no spectral gap: not a two-state regime"
             print(f"  [memkm] beta={b:5.3f}  theta_CO={cov['co']:.3f} "
-                  f"theta_O={cov['o']:.3f}  log10(A/B)={lr:+.3f}  "
+                  f"theta_O={cov['o']:.3f}  ln(A/B)={lr:+.3f}  "
                   f"gap={diag['spectral_gap']:.2f}  "
                   f"boundary={diag['boundary_mass']:.2e}{warn}", flush=True)
 
