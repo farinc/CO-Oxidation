@@ -16,6 +16,7 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import mpltern  # noqa: F401  (registers the projection="ternary" Axes)
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -401,22 +402,30 @@ def plot_partition_diagnostics(betas, cols, beta_star, out_prefix, tag=""):
 
 
 def _coverage_pcolor(ax, grid, l, cmap, norm=None, vmin=None, vmax=None):
-    """Draw one coverage-class grid on `ax` as a pcolormesh. Cells are centered
-    on integer (N_CO, N_O) with edges at the half-integers, so (0, 0) is the
-    empty-tile cell; every cell is outlined (grid line at every integer)."""
-    edges = np.arange(l + 2) - 0.5              # cell boundaries: -0.5 .. l+0.5
+    """Draw one coverage-class grid on `ax` (a projection="ternary" axes) as a
+    pcolormesh over the (N_CO, N_O, N_*) simplex, using N_* = l - N_CO - N_O
+    as the third barycentric coordinate. Cells are centered on integer
+    (N_CO, N_O) with edges at the half-integers, so (0, 0) is the empty-tile
+    cell; every cell is outlined (grid line at every integer row/column)."""
+    edges = (np.arange(l + 2) - 0.5) / l          # theta edges: -0.5/l .. (l+0.5)/l
+    t, r = np.meshgrid(edges, edges, indexing="ij")  # t=N_O row, r=N_CO col
+    lft = 1.0 - t - r                              # N_*/l
+    tlr = np.column_stack((t.ravel(), lft.ravel(), r.ravel()))
+    xy = ax.transProjection.transform(tlr)
+    x, y = xy[:, 0].reshape(t.shape), xy[:, 1].reshape(t.shape)
+
     data = np.ma.masked_invalid(grid).T          # -> [N_O (row), N_CO (col)]
     kw = {"norm": norm} if norm is not None else {"vmin": vmin, "vmax": vmax}
-    im = ax.pcolormesh(edges, edges, data, cmap=cmap,
-                       edgecolors="0.35", linewidth=1.2, **kw)
-    ax.grid(False)                               # only the cell edges, no theme grid
-    ax.set_aspect("equal")
-    ax.set_xlabel(r"$N_\mathrm{CO}$")
-    ax.set_ylabel(r"$N_\mathrm{O}$")
-    ax.set_xticks(np.arange(0, l + 1))           # integer labels every 1
-    ax.set_yticks(np.arange(0, l + 1))
-    ax.set_xlim(-0.5, l + 0.5)
-    ax.set_ylim(-0.5, l + 0.5)
+    im = ax.pcolormesh(x, y, data, cmap=cmap,
+                       edgecolors="0.35", linewidth=0.6, **kw)
+    ax.set_tlabel(r"$N_O$")
+    ax.set_llabel(r"$N_*$")
+    ax.set_rlabel(r"$N_\mathrm{CO}$")
+    ticks = np.arange(0, l + 1) / l               # one tick per row, at its center
+    labels = [str(i) for i in range(l + 1)]
+    for axis in (ax.taxis, ax.laxis, ax.raxis):
+        axis.set_ticks(ticks)
+        axis.set_ticklabels(labels)
     return im
 
 
@@ -430,7 +439,8 @@ def _inset_colorbar(fig, ax, im, label=None):
 
 
 def plot_coverage_map(arrays, out_prefix, tag=""):
-    """Coverage-class maps over the (N_CO, N_O) plane at beta*, in two figures:
+    """Coverage-class maps over the (N_CO, N_O, N_*) simplex at beta*, drawn
+    as ternary diagrams (N_* = l - N_CO - N_O), in two figures:
 
       {..}_coverage-population.png : the stationary marginal log10 sum_i pi_i,
         which states are populated (the two basins + transition valley),
@@ -457,7 +467,8 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
     r2_m = np.where(empty, np.nan, r2map)
 
     # Figure 1: stationary population, with the degeneracy-corrected view beside it.
-    fig, ax = plt.subplots(1, 1, figsize=(12, 5.5), constrained_layout=True)
+    fig, ax = plt.subplots(1, 1, figsize=(7, 6.5), constrained_layout=True,
+                           subplot_kw={"projection": "ternary"})
     im0 = _coverage_pcolor(ax, logpop, l, "viridis")
     ax.set_title(rf"Stationary Distribution by Coverage-class at $\beta^*$ = {beta_star:.4g}")
     _inset_colorbar(fig, ax, im0)
@@ -473,7 +484,8 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
                                 vmax=np.nanmax(grid))
         return None
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5.5), constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6.5), constrained_layout=True,
+                             subplot_kw={"projection": "ternary"})
     im0 = _coverage_pcolor(axes[0], r2_m, l, "coolwarm", norm=_diverging(r2_m))
     axes[0].set_title(r"Slowest Relaxation Mode $\phi_2^R(n_\mathrm{CO},n_\mathrm{O})$")
     _inset_colorbar(fig, axes[0], im0)
