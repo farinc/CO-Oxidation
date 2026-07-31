@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "me-mkm",
-    "mpltern>=1.0.5",
     "numba>=0.66.0",
     "numpy>=2.4.6",
     "pandas>=3.0.3",

@@ -15,10 +15,9 @@ Usage:
 import argparse
 from pathlib import Path
 
-import matplotlib.axes as maxes
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Rectangle
 import matplotlib.pyplot as plt
-from matplotlib.tri import Triangulation
-import mpltern  # noqa: F401  (registers the projection="ternary" Axes)
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -38,17 +37,6 @@ from sweeps._common import (
 
 MODEL_LABELS = {"mf": "MF-MK", "ea": "Ea-MK"}
 MODEL_COLORS = {"mf": None, "ea": "green"}
-
-
-def simplex_mesh(n: int):
-    """Lattice vertices (thetaA, thetaB) of an n-row barycentric simplex --
-    thetaA=c/n, thetaB=(r-c)/n for every (r, c) with r=0..n, c=0..r -- in the
-    same row-major order `_coverage_pcolor`'s `idx(r, c) = r*(r+1)//2 + c`
-    assumes. `np.tril_indices` gives exactly that (r, c) traversal without a
-    Python-level double loop."""
-    r, c = np.tril_indices(n + 1)
-    return c / n, (r - c) / n
-
 
 def rates_dataframe(beta, theta_o, delta_scale=DELTA_SCALE, mf_physics=None):
     """Fig. 4 rate curves vs theta_CO at fixed beta and theta_O.
@@ -414,62 +402,32 @@ def plot_partition_diagnostics(betas, cols, beta_star, out_prefix, tag=""):
 
 
 def _coverage_pcolor(ax, grid, l, cmap, norm=None, vmin=None, vmax=None):
-    """Each *upward*-pointing triangle of an (l+1)-row simplex mesh is one
-    coverage class: an n=l row mesh only has l boundary triangles per edge
-    (one short of the l+1 classes 0..l), so the mesh is built one row denser
-    (n=l+1) -- its n(n+1)/2 = (l+1)(l+2)/2 up-triangles are in exact 1:1
-    correspondence with the (n_CO, n_O) classes (n_CO+n_O<=l), each getting
-    its own unblended color via `facecolors` (not per-vertex averaging).
-    The interleaved down-triangles aren't classes (they're the l-row dual
-    simplex's triangles) and are left unfilled."""
-    n = l + 1
-    theta_co_v, theta_o_v = simplex_mesh(n)
-
-    def idx(r, c):
-        return r * (r + 1) // 2 + c
-
-    up_triangles, vals = [], []
-    for r in range(1, n + 1):
-        for c in range(r):
-            up_triangles.append((idx(r - 1, c), idx(r, c), idx(r, c + 1)))
-            vals.append(grid[c, r - 1 - c])          # (n_CO, n_O) for this class
-    up_triangles = np.array(up_triangles)
-    vals = np.array(vals)
-
-    theta_star_v = 1.0 - theta_co_v - theta_o_v
-    tlr = np.column_stack((theta_star_v, theta_o_v, theta_co_v))  # (t, l, r)
-    xy = ax.transProjection.transform(tlr)
-
-    tri = Triangulation(xy[:, 0], xy[:, 1], up_triangles)
-    tri.set_mask(~np.isfinite(vals))
-
-    kw = {"norm": norm} if norm is not None else {"vmin": vmin, "vmax": vmax}
-    im = maxes.Axes.tripcolor(ax, tri, facecolors=vals, cmap=cmap, shading="flat",
-                              edgecolors="0.35", linewidth=0.4, **kw)
-
-    ax.set_tlabel(r"$N_\ast$")
-    ax.set_llabel(r"$N_\mathrm{O}$")
-    ax.set_rlabel(r"$N_\mathrm{CO}$")
-    ticks = (np.arange(n) + 0.5) / n                # centered on each boundary triangle
-    labels = [str(i) for i in range(n)]              # 0..l inclusive (n = l+1 of them)
-    for axis in (ax.taxis, ax.laxis, ax.raxis):
-        axis.set_ticks(ticks)
-        axis.set_ticklabels(labels)
-        axis.set_label_position("tick1")            # N_* / N_O / N_CO on the sides
-        # tick1On/label1On get reset to False as a side effect of the plain
-        # Axes.tripcolor call above (it's not ternary-aware, so its internal
-        # autoscale/set_xlim touches state mpltern's tick machinery depends
-        # on) -- so they have to be forced back on here, not just sized.
-        axis.set_tick_params(length=7, width=1.2, tick1On=True, label1On=True)
-
-    # Pure-species labels at the corners themselves, nudged out past the
-    # vertex along that corner's outward direction (`ax.text` takes ternary
-    # (t, l, r) triples and normalizes them, so a small negative pair on the
-    # other two axes pushes the point past the t=1/l=1/r=1 corner).
-    pad = 0.05
-    ax.text(1 + pad, -pad / 2, -pad / 2, r"$\ast$", ha="center", va="bottom")
-    ax.text(-pad / 2, 1 + pad, -pad / 2, r"$\mathrm{O}$", ha="right", va="top")
-    ax.text(-pad / 2, -pad / 2, 1 + pad, r"$\mathrm{CO}$", ha="left", va="top")
+    """Draw one coverage-class grid on `ax` as a brick-stack pyramid: row N_O
+    (of length l+1-N_O) is offset right by N_O/2 as a whole, centering it
+    under the full-width N_O=0 row, so the accessible region reads as a
+    symmetric triangle of unit *squares* -- not a sheared parallelogram mesh,
+    where the offset would vary between a cell's own top and bottom edges and
+    leave every cell a slightly slanted trapezoid. Each valid (n_CO, n_O)
+    class is one square, drawn individually since adjacent rows don't share
+    edges (this is a staggered brick wall, not a connected grid)."""
+    n_co, n_o = np.where(np.isfinite(grid))
+    vals = grid[n_co, n_o]
+    squares = [Rectangle((co + o / 2 - 0.5, o - 0.5), 1, 1)
+              for co, o in zip(n_co, n_o)]
+    im = PatchCollection(squares, cmap=cmap, edgecolor="0.35", linewidth=1.2)
+    im.set_array(vals)
+    if norm is not None:
+        im.set_norm(norm)
+    else:
+        im.set_clim(vmin, vmax)
+    ax.add_collection(im)
+    ax.set_aspect("equal")
+    ax.set_xlabel(r"$N_\mathrm{CO}$")
+    ax.set_ylabel(r"$N_\mathrm{O}$")
+    ax.set_xticks([])                            # x no longer maps 1:1 to N_CO once shifted
+    ax.set_yticks(np.arange(0, l + 1))
+    ax.set_xlim(-0.5, l + 0.5)
+    ax.set_ylim(-0.5, l + 0.5)
     return im
 
 
@@ -483,8 +441,7 @@ def _inset_colorbar(fig, ax, im, label=None):
 
 
 def plot_coverage_map(arrays, out_prefix, tag=""):
-    """Coverage-class maps over the (N_CO, N_O, N_*) simplex at beta*, drawn
-    as ternary diagrams (N_* = l - N_CO - N_O), in two figures:
+    """Coverage-class maps over the (N_CO, N_O) plane at beta*, in two figures:
 
       {..}_coverage-population.png : the stationary marginal log10 sum_i pi_i,
         which states are populated (the two basins + transition valley),
@@ -511,12 +468,11 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
     r2_m = np.where(empty, np.nan, r2map)
 
     # Figure 1: stationary population, with the degeneracy-corrected view beside it.
-    fig, ax = plt.subplots(1, 1, figsize=(7, 6.5), constrained_layout=True,
-                           subplot_kw={"projection": "ternary"})
+    fig, ax = plt.subplots(1, 1, figsize=(12, 5.5), constrained_layout=True)
     im0 = _coverage_pcolor(ax, logpop, l, "viridis")
     ax.set_title(rf"Stationary Distribution by Coverage-class at $\beta^*$ = {beta_star:.4g}",
-                pad=36)
-    _inset_colorbar(fig, ax, im0)
+                pad=10)
+    _inset_colorbar(fig, ax, im0, label=r"\ln(w_{n_\mathrm{CO}, n_\mathrm{O}})")
     fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-population.png",
                 dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -529,8 +485,7 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
                                 vmax=np.nanmax(grid))
         return None
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6.5), constrained_layout=True,
-                             subplot_kw={"projection": "ternary"})
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5.5), constrained_layout=True)
     im0 = _coverage_pcolor(axes[0], r2_m, l, "coolwarm", norm=_diverging(r2_m))
     axes[0].set_title(r"Slowest Relaxation Mode $\phi_2^R(n_\mathrm{CO},n_\mathrm{O})$",
                       pad=36)
