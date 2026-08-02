@@ -472,7 +472,7 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
     im0 = _coverage_pcolor(ax, logpop, l, "viridis")
     ax.set_title(rf"Stationary Distribution by Coverage-class at $\beta^*$ = {beta_star:.4g}",
                 pad=10)
-    _inset_colorbar(fig, ax, im0, label=r"\ln(w_{n_\mathrm{CO}, n_\mathrm{O}})")
+    _inset_colorbar(fig, ax, im0, label=r"$\ln(w_{n_\mathrm{CO}, n_\mathrm{O}})$")
     fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-population.png",
                 dpi=150, bbox_inches="tight")
     plt.close(fig)
