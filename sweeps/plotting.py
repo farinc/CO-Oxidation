@@ -162,7 +162,7 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     sweep (the MEMKM_COLS dict), drawn as the basin-weight ratio curve and the
     partition-validity continuity panel."""
     beta_star = arrays["beta_star"]
-    eigvals = arrays["eigvals"]
+    eigvals = np.sort(arrays["eigvals"])[::-1] # most positive first, for the slowest modes
     phi_slow = arrays["phi_slow"]
     phi2 = arrays["phi2"]
     theta = arrays["theta"]
@@ -183,39 +183,36 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     # exactly-zero imaginary parts still draw as zero-height bars instead of
     # disappearing.
     eig_labels = [rf"$\lambda_{{{i}}}$" for i in range(K)]
-    fig, axes = plt.subplots(1, 2, sharex=True, figsize=(max(9.0, 0.4 * K), 5.5))
+    fig, axes = plt.subplots(1, 2, figsize=(max(9.0, 0.3 * K), 5.5))
     fig.suptitle(rf"Eigenvalues of $W$ at $\beta^*$ = {beta_star:.4g}")
-    bars_real = axes[0].bar(np.arange(K), eigvals.real)
+    axes[0].bar(np.arange(K), eigvals.real)
     axes[0].set_title("Real Component", fontsize=14)
-    bars_imag = axes[1].bar(np.arange(K), eigvals.imag)
+    axes[1].bar(np.arange(K), eigvals.imag)
     axes[1].set_title("Imaginary Component", fontsize=14)
-    for ax, bars, vals in zip(axes, [bars_real, bars_imag],
-                              [eigvals.real, eigvals.imag]):
+    max_yticks = 7
+    for ax, vals, label_all in zip(axes, [eigvals.real, eigvals.imag],
+                                   [True, False]):
         nonzero_mask = vals != 0.0
         nonzero = np.abs(vals[nonzero_mask])
         linthresh = nonzero.min() if nonzero.size else 1.0
         ax.set_yscale('symlog', linthresh=linthresh)
-        ax.axhline(0, color='k', label='_')
-        # Exactly-zero bars (every purely real mode, in the imaginary panel)
-        # carry no information beyond "zero" and sit on top of each other at
-        # the axis; label only the bars that actually stick out.
-        labels = [lab if nz else "" for lab, nz in zip(eig_labels, nonzero_mask)]
-        ax.bar_label(bars, labels=labels, rotation=90, fontsize=9, padding=3)
-    # Grow each axis to fit the label text matplotlib actually rendered,
-    # rather than guessing a headroom multiplier by hand: draw once, read
-    # back every label's bounding box in data coordinates, and extend ylim
-    # to cover it. This also keeps the real-component axis pinned at 0 on
-    # the positive side, since nothing (bars or labels) sits above it there.
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
-    for ax in axes:
-        ymin, ymax = ax.get_ylim()
-        for txt in ax.texts:
-            bbox = txt.get_window_extent(renderer=renderer)
-            bbox_data = bbox.transformed(ax.transData.inverted())
-            ymin = min(ymin, bbox_data.y0, bbox_data.y1)
-            ymax = max(ymax, bbox_data.y0, bbox_data.y1)
-        ax.set_ylim(ymin, ymax)
+        ax.axhline(0, color='k', lw=0.8)
+        # Every mode is informative for the real panel; the imaginary panel's
+        # exact zeros (every purely real mode) carry no information beyond
+        # "zero" and sit on top of each other at the axis, so only the modes
+        # that actually stick out get a tick label there.
+        shown = np.arange(K) if label_all else np.flatnonzero(nonzero_mask)
+        ax.set_xticks(shown)
+        ax.set_xticklabels([eig_labels[i] for i in shown], rotation=90,
+                           fontsize=9)
+        # Thin the symlog locator's one-tick-per-decade default down to a
+        # readable handful, keeping it symmetric about zero.
+        ticks = ax.yaxis.get_majorticklocs()
+        if len(ticks) > max_yticks:
+            keep = np.unique(np.linspace(0, len(ticks) - 1, max_yticks)
+                             .round().astype(int))
+            ticks = ticks[keep]
+        ax.set_yticks(ticks)
     fig.tight_layout()
     fig.savefig(f"{out_prefix}_coexistence{tag}_eigenvalues.png", dpi=150,
                 bbox_inches="tight")
