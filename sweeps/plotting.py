@@ -442,13 +442,16 @@ def _inset_colorbar(fig, ax, im, label=None):
 
 
 def plot_coverage_map(arrays, out_prefix, tag=""):
-    """Coverage-class maps over the (N_CO, N_O) plane at beta*, in two figures:
+    """Coverage-class maps over the (N_CO, N_O) plane at beta*, in three figures,
+    all the same size and dpi so they line up as a set:
 
-      {..}_coverage-population.png : the stationary marginal log10 sum_i pi_i,
-        which states are populated (the two basins + transition valley),
-      {..}_coverage-reaction.png  : the slow right mode sum phi_^_2 (whose *sign*
-        is the macrostate partition), the unweighted class-mean slow left mode
-        <phi_2^L>.
+      {..}_coverage-population.png : the stationary marginal P(N_CO, N_O) =
+        sum_i pi_i, which states are populated (the two basins + transition
+        valley),
+      {..}_coverage-r2.png  : the slow right mode sum phi_2^R (whose *sign* is
+        the macrostate partition),
+      {..}_coverage-phi2.png : the unweighted class-mean slow left mode
+        <phi_2^L>, the reaction coordinate.
 
     Cells are centered on integer (N_CO, N_O); the inaccessible corner
     (N_CO + N_O > l) and empty classes are masked."""
@@ -463,42 +466,48 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
     deg = arrays["cov_deg"]
     a = np.arange(l + 1)
     outside = (a[:, None] + a[None, :]) > l
-    logpop = np.where((pop > 0) & ~outside, np.log(np.where(pop > 0, pop, 1)),np.nan)
+    pop_m = np.where((pop > 0) & ~outside, pop, np.nan)
     empty = outside | (deg <= 0)
     phi_m = np.where(outside, np.nan, phi)
     r2_m = np.where(empty, np.nan, r2map)
 
-    # Figure 1: stationary population, with the degeneracy-corrected view beside it.
-    fig, ax = plt.subplots(1, 1, figsize=(12, 5.5), constrained_layout=True)
-    im0 = _coverage_pcolor(ax, logpop, l, "viridis")
+    figsize, dpi = (12, 5.5), 150
+
+    # Figure 1: stationary population.
+    fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
+    im0 = _coverage_pcolor(ax, pop_m, l, "Blues")
     ax.set_title(rf"Stationary Distribution by Coverage-class at $\beta^*$ = {beta_star:.4g}",
                 pad=10)
-    _inset_colorbar(fig, ax, im0, label=r"$\ln(w_{n_\mathrm{CO}, n_\mathrm{O}})$")
+    _inset_colorbar(fig, ax, im0, label=r"$P(N_\mathrm{CO}, N_\mathrm{O})$")
     fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-population.png",
-                dpi=150, bbox_inches="tight")
+                dpi=dpi, bbox_inches="tight")
     plt.close(fig)
 
-    # Figure 2: the partition (r_2) and the reaction coordinate (phi_2^L),
-    # which should both place the dividing surface in the same place.
+    # Figures 2 and 3: the partition (r_2) and the reaction coordinate
+    # (phi_2^L), split into their own figures so each stands alone, but which
+    # should both place the dividing surface in the same place.
     def _diverging(grid, center=0.0):
         if np.isfinite(grid).any() and np.nanmin(grid) < 0 < np.nanmax(grid):
             return TwoSlopeNorm(vcenter=center, vmin=np.nanmin(grid),
                                 vmax=np.nanmax(grid))
         return None
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5.5), constrained_layout=True)
-    im0 = _coverage_pcolor(axes[0], r2_m, l, "coolwarm", norm=_diverging(r2_m))
-    axes[0].set_title(r"Slowest Relaxation Mode $\phi_2^R(n_\mathrm{CO},n_\mathrm{O})$",
-                      pad=36)
-    _inset_colorbar(fig, axes[0], im0)
-    im1 = _coverage_pcolor(axes[1], phi_m, l, "coolwarm", norm=_diverging(phi_m))
-    axes[1].set_title(r"Reaction Coordinate $\phi_2^L(n_\mathrm{CO},n_\mathrm{O})$",
-                      pad=36)
-    _inset_colorbar(fig, axes[1], im1)
-    fig.suptitle(rf"Partition and reaction coordinate in coverage space at "
-                 rf"$\beta^*$ = {beta_star:.4g}")
-    fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-reaction.png",
-                dpi=150, bbox_inches="tight")
+    fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
+    im0 = _coverage_pcolor(ax, r2_m, l, "coolwarm", norm=_diverging(r2_m))
+    ax.set_title(rf"Slowest Relaxation Mode $\phi_2^R(n_\mathrm{{CO}},n_\mathrm{{O}})$ "
+                 rf"at $\beta^*$ = {beta_star:.4g}", pad=10)
+    _inset_colorbar(fig, ax, im0, label=r"$\phi_2^R(n_\mathrm{CO},n_\mathrm{O})$")
+    fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-r2.png",
+                dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
+    im1 = _coverage_pcolor(ax, phi_m, l, "coolwarm", norm=_diverging(phi_m))
+    ax.set_title(rf"Reaction Coordinate $\phi_2^L(n_\mathrm{{CO}},n_\mathrm{{O}})$ "
+                 rf"at $\beta^*$ = {beta_star:.4g}", pad=10)
+    _inset_colorbar(fig, ax, im1, label=r"$\phi_2^L(n_\mathrm{CO},n_\mathrm{O})$")
+    fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-phi2.png",
+                dpi=dpi, bbox_inches="tight")
     plt.close(fig)
 
 
