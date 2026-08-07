@@ -370,8 +370,8 @@ class CoexistencePipeline:
         oxidation: [N_CO, N_O]):
 
           cov_pop[a, b] = sum_{i in class} pi_i               (population)
-          cov_phi[a, b] = <phi_2^L>_pi over the class         (slow coordinate)
-          cov_r2[a, b]  = sum_{i in class} r_2,i / max|r_2|   (slow mode)
+          cov_phi[a, b] = mean_{i in class} phi_2^L,i         (slow coordinate)
+          cov_r2[a, b]  = sum_{i in class} r_2,i              (slow mode)
           cov_deg[a, b] = number of microstates in the class  (degeneracy)
 
         r_2 is a density, not a coordinate, so it is *summed* over each class
@@ -379,21 +379,20 @@ class CoexistencePipeline:
         coverage class to each macrostate's weight, and they sum to zero over
         the whole plane. Its sign is the partition itself.
 
-        phi is NaN where the class carries no stationary weight; degeneracy
-        lets a caller form the per-microstate mean weight cov_pop / cov_deg,
-        which strips the combinatorial class-size factor from the population."""
+        phi is NaN where the class is empty; degeneracy lets a caller form the
+        per-microstate mean weight cov_pop / cov_deg, which strips the
+        combinatorial class-size factor from the population."""
         l = builder.l
         cov_pop = np.zeros((l + 1, l + 1))
         cov_phi = np.full((l + 1, l + 1), np.nan)
         cov_r2 = np.zeros((l + 1, l + 1))
         cov_deg = np.zeros((l + 1, l + 1))
-        r2_scaled = np.asarray(r2) / np.abs(r2).max()
+        r2 = np.asarray(r2)
         for counts, idxs in coverage_classes(builder):
             a, b = int(counts[0]), int(counts[1])
-            w = theta[idxs].sum()
-            cov_pop[a, b] = w
+            cov_pop[a, b] = theta[idxs].sum()
             cov_deg[a, b] = len(idxs)
-            cov_r2[a, b] = r2_scaled[idxs].sum()
-            if w > 0.0:
-                cov_phi[a, b] = (theta[idxs] * phi2[idxs]).sum() / w
+            cov_r2[a, b] = r2[idxs].sum()
+            if len(idxs) > 0:
+                cov_phi[a, b] = phi2[idxs].mean()
         return cov_pop, cov_phi, cov_r2, cov_deg

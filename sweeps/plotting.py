@@ -172,6 +172,7 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     log_ratios = cols["log_ratio"]
     palette = sns.color_palette("deep")
     K = len(eigvals)
+    Ks = np.arange(1,K+1)
 
     # 1. Eigenvalue spectrum (real / imaginary). Re(lambda) <= 0 for every mode
     # but lambda_1 (the generator has no unstable direction), and most modes
@@ -182,12 +183,11 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
     # around zero sized to the smallest nonzero |eigenvalue|, so the many
     # exactly-zero imaginary parts still draw as zero-height bars instead of
     # disappearing.
-    eig_labels = [rf"$\lambda_{{{i}}}$" for i in range(K)]
     fig, axes = plt.subplots(1, 2, figsize=(max(9.0, 0.3 * K), 5.5))
     fig.suptitle(rf"Eigenvalues of $W$ at $\beta^*$ = {beta_star:.4g}")
-    axes[0].bar(np.arange(K), eigvals.real)
+    axes[0].bar(Ks, eigvals.real)
     axes[0].set_title("Real Component", fontsize=14)
-    axes[1].bar(np.arange(K), eigvals.imag)
+    axes[1].bar(Ks, eigvals.imag)
     axes[1].set_title("Imaginary Component", fontsize=14)
     max_yticks = 7
     for ax, vals, label_all in zip(axes, [eigvals.real, eigvals.imag],
@@ -201,10 +201,9 @@ def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
         # exact zeros (every purely real mode) carry no information beyond
         # "zero" and sit on top of each other at the axis, so only the modes
         # that actually stick out get a tick label there.
-        shown = np.arange(K) if label_all else np.flatnonzero(nonzero_mask)
+        shown = Ks if label_all else Ks[nonzero_mask]
         ax.set_xticks(shown)
-        ax.set_xticklabels([eig_labels[i] for i in shown], rotation=90,
-                           fontsize=9)
+        ax.set_xticklabels([rf"$\lambda_{{{i}}}$" for i in shown])
         # Thin the symlog locator's one-tick-per-decade default down to a
         # readable handful, keeping it symmetric about zero.
         ticks = ax.yaxis.get_majorticklocs()
@@ -418,7 +417,12 @@ def _coverage_pcolor(ax, grid, l, cmap, norm=None, vmin=None, vmax=None):
     else:
         im.set_clim(vmin, vmax)
     ax.add_collection(im)
-    ax.set_aspect("equal")
+    # Base (N_O=0 row) and total height both span l+1 data units, so an
+    # "equal" aspect draws a triangle taller than it is wide (height/base=1
+    # vs. sqrt(3)/2 for equilateral). Squashing the y-unit by sqrt(3)/2 fixes
+    # the overall proportions while keeping each class an axis-aligned
+    # rectangle rather than shearing the mesh.
+    ax.set_aspect(np.sqrt(3) / 2)
     ax.set_xlabel(r"$N_\mathrm{CO}$")
     ax.set_ylabel(r"$N_\mathrm{O}$")
     ax.set_xticks([])                            # x no longer maps 1:1 to N_CO once shifted
@@ -443,7 +447,7 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
       {..}_coverage-population.png : the stationary marginal log10 sum_i pi_i,
         which states are populated (the two basins + transition valley),
       {..}_coverage-reaction.png  : the slow right mode sum phi_^_2 (whose *sign*
-        is the macrostate partition), the pi-weighted slow left mode
+        is the macrostate partition), the unweighted class-mean slow left mode
         <phi_2^L>.
 
     Cells are centered on integer (N_CO, N_O); the inaccessible corner
@@ -454,7 +458,7 @@ def plot_coverage_map(arrays, out_prefix, tag=""):
     l = arrays["n_sites"]
     pop = arrays["cov_pop"]
     phi = arrays["cov_phi"]
-    r2map = arrays["cov_r2"]   # class sums of r_2 / max|r_2|; sign = partition
+    r2map = arrays["cov_r2"]   # class sums of r_2; sign = partition
 
     deg = arrays["cov_deg"]
     a = np.arange(l + 1)

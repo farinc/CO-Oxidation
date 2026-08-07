@@ -371,7 +371,7 @@ def build_argparser(description, memkm_default=True):
                             "hard partition (and so beta*) is sensitive to small "
                             "numerical or model changes")
     memkm.add_argument("--memkm-n-eigs", "--n-eigs-report", dest="memkm_n_eigs",
-                       type=int, default=20,
+                       type=int, default=4,
                        help="left eigenpairs solved at each coexistence point, for "
                             "the reaction-coordinate diagnostics only")
     memkm.add_argument("--memkm-brent-xtol", "--brent-xtol",
