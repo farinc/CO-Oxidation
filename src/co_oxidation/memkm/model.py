@@ -1,31 +1,31 @@
 from me_mkm import BepBarrierModel, FrozenTransitionStateBarrier, MEMKMBuilder, Reaction
 from ..common import EMPTY, CO, O
 
-def generate_model(beta, tile, delta_scale=1e-4, alpha=1.6, gamma=1e-3, kr=1.0,
-                   khop_scale=1000.0, eps=8368.0, temperature=500.0):
-    """ME-MKM generator at one beta.
+def generate_model(k_o_ads, tile, k_o_des_scale=1e-4, k_co_ads=1.6, k_co_des=1e-3,
+                   k_rxn=1.0, khop_scale=1000.0, eps=8368.0, temperature=500.0):
+    """ME-MKM generator at one k_o_ads.
 
     The physical parameters mirror the kMC model (co_oxidation.kmc.KMCParams)
     so both phases describe the same chemistry; the sweep drivers thread the
     same CLI values into both:
 
-      alpha        CO adsorption rate, s^-1
-      gamma        CO desorption prefactor, s^-1
-      kr           CO + O reaction prefactor, s^-1
-      khop_scale   fast-diffusion factor: khop = khop_scale * max(beta, alpha)
+      k_co_ads     CO adsorption rate, s^-1
+      k_co_des     CO desorption prefactor, s^-1
+      k_rxn        CO + O reaction prefactor, s^-1
+      khop_scale   fast-diffusion factor: khop = khop_scale * max(k_o_ads, k_co_ads)
       eps          CO-CO nearest-neighbour repulsion, J/mol (enters as -eps)
       temperature  temperature, K
-      delta_scale  O2 desorption scale: delta = delta_scale * beta; 0.0 for
+      k_o_des_scale  O2 desorption scale: k_o_des = k_o_des_scale * k_o_ads; 0.0 for
                    irreversible O2 adsorption.
     """
-    khop = khop_scale * max(beta, alpha)
+    khop = khop_scale * max(k_o_ads, k_co_ads)
     rates = {
-        "alpha": alpha,
-        "beta": beta,
-        "gamma": gamma,
-        "delta": delta_scale * beta,
-        "kr": kr,
-        "kh": khop,
+        "k_co_ads": k_co_ads,
+        "k_o_ads": k_o_ads,
+        "k_co_des": k_co_des,
+        "k_o_des": k_o_des_scale * k_o_ads,
+        "k_rxn": k_rxn,
+        "khop": khop,
     }
     # Eigenvalues and eigenvectors of the W, ask AI. 2D analog with observables a L.C of eigenvectors.
     # The more eligant solution is spectral theory.
@@ -41,13 +41,13 @@ def generate_model(beta, tile, delta_scale=1e-4, alpha=1.6, gamma=1e-3, kr=1.0,
 
     # Define the reactions
     reactions = [
-        Reaction([EMPTY], [CO], rate=rates["alpha"], name="CO_ads", rate_symbol="α", rate_symbol_latex=r"\alpha"),
-        Reaction([CO], [EMPTY], rate=rates["gamma"], name="CO_des", rate_symbol="γ", rate_symbol_latex=r"\gamma"),
-        Reaction([EMPTY, EMPTY], [O, O], rate=rates["beta"], name="O2_ads", rate_symbol="β", rate_symbol_latex=r"\beta"),
-        Reaction([O, O], [EMPTY, EMPTY], rate=rates["delta"], name="O2_des", rate_symbol="δ", rate_symbol_latex=r"\delta"),
-        Reaction([CO, O], [EMPTY, EMPTY], rate=rates["kr"], name="CO_oxd", rate_symbol="kr", rate_symbol_latex=r"k_{r}"),
-        Reaction([CO, EMPTY], [EMPTY, CO], rate=rates["kh"], name="CO_hop", rate_symbol="kh", rate_symbol_latex=r"k_{h}", interaction=co_hop),
-        Reaction([O, EMPTY], [EMPTY, O], rate=rates["kh"], name="O_hop", rate_symbol="kh", rate_symbol_latex=r"k_{h}")
+        Reaction([EMPTY], [CO], rate=rates["k_co_ads"], name="CO_ads", rate_symbol="k_CO,ads", rate_symbol_latex=r"k_{\mathrm{CO,ads}}"),
+        Reaction([CO], [EMPTY], rate=rates["k_co_des"], name="CO_des", rate_symbol="k_CO,des", rate_symbol_latex=r"k_{\mathrm{CO,des}}"),
+        Reaction([EMPTY, EMPTY], [O, O], rate=rates["k_o_ads"], name="O2_ads", rate_symbol="k_O,ads", rate_symbol_latex=r"k_{\mathrm{O,ads}}"),
+        Reaction([O, O], [EMPTY, EMPTY], rate=rates["k_o_des"], name="O2_des", rate_symbol="k_O,des", rate_symbol_latex=r"k_{\mathrm{O,des}}"),
+        Reaction([CO, O], [EMPTY, EMPTY], rate=rates["k_rxn"], name="CO_oxd", rate_symbol="k_rxn", rate_symbol_latex=r"k_{\mathrm{rxn}}"),
+        Reaction([CO, EMPTY], [EMPTY, CO], rate=rates["khop"], name="CO_hop", rate_symbol="k_hop", rate_symbol_latex=r"k_{\mathrm{hop}}", interaction=co_hop),
+        Reaction([O, EMPTY], [EMPTY, O], rate=rates["khop"], name="O_hop", rate_symbol="k_hop", rate_symbol_latex=r"k_{\mathrm{hop}}")
     ]
 
     species_names=["*", "CO", "O"]

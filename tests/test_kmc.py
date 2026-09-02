@@ -15,7 +15,7 @@ R_GAS = kmc.R_GAS
 # self-count fix).
 # --------------------------------------------------------------------------
 
-def oracle_rate_matrix(lat, L, alpha, gamma, beta, kr, khop, delta=0.0,
+def oracle_rate_matrix(lat, L, k_co_ads, k_co_des, k_o_ads, k_rxn, khop, k_o_des=0.0,
                        eps=8368.0, T=500.0):
     w = eps / (R_GAS * T)
     N = L * L
@@ -33,17 +33,17 @@ def oracle_rate_matrix(lat, L, alpha, gamma, beta, kr, khop, delta=0.0,
     rates = np.zeros((N, kmc.J_MAX))
     for i in range(N):
         if lat[i] == kmc.EMPTY:
-            rates[i, 0] = alpha
+            rates[i, 0] = k_co_ads
         elif lat[i] == kmc.CO:
-            rates[i, 1] = gamma * np.exp(nco(i) * w)
+            rates[i, 1] = k_co_des * np.exp(nco(i) * w)
         for joff, p in ((0, right(i)), (1, down(i))):
             si, sp = lat[i], lat[p]
             if si == kmc.EMPTY and sp == kmc.EMPTY:
-                rates[i, 2 + joff] = beta
+                rates[i, 2 + joff] = k_o_ads
             if si == kmc.CO and sp == kmc.O:
-                rates[i, 4 + joff] = kr * np.exp(nco(i) * w)
+                rates[i, 4 + joff] = k_rxn * np.exp(nco(i) * w)
             if si == kmc.O and sp == kmc.CO:
-                rates[i, 4 + joff] = kr * np.exp(nco(p) * w)
+                rates[i, 4 + joff] = k_rxn * np.exp(nco(p) * w)
             if si == kmc.CO and sp == kmc.EMPTY:
                 dn = (nco(p) - 1) - nco(i)
                 rates[i, 6 + joff] = khop * np.exp(-dn * w / 2.0)
@@ -53,7 +53,7 @@ def oracle_rate_matrix(lat, L, alpha, gamma, beta, kr, khop, delta=0.0,
             if (si == kmc.O and sp == kmc.EMPTY) or (si == kmc.EMPTY and sp == kmc.O):
                 rates[i, 8 + joff] = khop
             if si == kmc.O and sp == kmc.O:
-                rates[i, 10 + joff] = delta
+                rates[i, 10 + joff] = k_o_des
     return rates
 
 
@@ -70,7 +70,7 @@ def class_rate_matrix(lat, L, class_rate):
     return out
 
 
-PARAMS = dict(alpha=1.6, gamma=1e-3, beta=5.0, kr=1.0, khop=800.0, delta=0.3)
+PARAMS = dict(k_co_ads=1.6, k_co_des=1e-3, k_o_ads=5.0, k_rxn=1.0, khop=800.0, k_o_des=0.3)
 
 
 def random_lattice(L, seed, p=(0.4, 0.35, 0.25)):
@@ -114,7 +114,7 @@ def test_local_updates_match_full_rebuild():
 
 
 def test_class_rates_collapse_without_interactions():
-    r = kmc.make_class_rates(alpha=1.6, gamma=1e-3, beta=5.0, kr=1.0,
+    r = kmc.make_class_rates(k_co_ads=1.6, k_co_des=1e-3, k_o_ads=5.0, k_rxn=1.0,
                              khop=800.0, eps=0.0)
     np.testing.assert_allclose(r[kmc.CLASS_CO_HOP0:kmc.CLASS_CO_HOP0 + 7], 800.0)
     np.testing.assert_allclose(r[kmc.CLASS_CO_DES0:kmc.CLASS_CO_DES0 + 5], 1e-3)
@@ -122,37 +122,37 @@ def test_class_rates_collapse_without_interactions():
 
 
 def test_langmuir_equilibrium():
-    """beta=0, eps=0: pure CO adsorption/desorption must equilibrate at the
-    Langmuir coverage alpha/(alpha+gamma)."""
-    alpha, gamma = 1.0, 1.0
-    res = kmc.run_kmc(beta=0.0, init="empty", L=10, alpha=alpha, gamma=gamma,
+    """k_o_ads=0, eps=0: pure CO adsorption/desorption must equilibrate at the
+    Langmuir coverage k_co_ads/(k_co_ads+k_co_des)."""
+    k_co_ads, k_co_des = 1.0, 1.0
+    res = kmc.run_kmc(k_o_ads=0.0, init="empty", L=10, k_co_ads=k_co_ads, k_co_des=k_co_des,
                       eps=0.0, khop=10.0, t_max=400.0, t_equil=100.0,
                       sample_interval=1_000, seed=1234)
     assert not res.stuck
     assert res.steady_o == pytest.approx(0.0, abs=1e-12)
-    assert res.steady_co == pytest.approx(alpha / (alpha + gamma), abs=0.02)
+    assert res.steady_co == pytest.approx(k_co_ads / (k_co_ads + k_co_des), abs=0.02)
 
 
 def test_o2_desorption_reduces_o_coverage():
-    """With alpha=kr=0, only O2 ads/des is active. Irreversible O2 adsorption
-    (delta=0) jams near the dimer RSA limit (isolated vacancies can't accept
-    an O2 molecule on their own); making desorption reversible (delta>0)
+    """With k_co_ads=k_rxn=0, only O2 ads/des is active. Irreversible O2 adsorption
+    (k_o_des=0) jams near the dimer RSA limit (isolated vacancies can't accept
+    an O2 molecule on their own); making desorption reversible (k_o_des>0)
     must relax that to a measurably lower steady-state O coverage."""
-    common = dict(L=12, alpha=0.0, kr=0.0, khop=50.0, t_max=20.0,
+    common = dict(L=12, k_co_ads=0.0, k_rxn=0.0, khop=50.0, t_max=20.0,
                   t_equil=5.0, sample_interval=5_000, seed=1)
-    irrev = kmc.run_kmc(beta=2.0, init="empty", delta=0.0, **common)
-    rev = kmc.run_kmc(beta=2.0, init="empty", delta=5.0, **common)
+    irrev = kmc.run_kmc(k_o_ads=2.0, init="empty", k_o_des=0.0, **common)
+    rev = kmc.run_kmc(k_o_ads=2.0, init="empty", k_o_des=5.0, **common)
     assert irrev.steady_o > 0.9
     assert 0.0 < rev.steady_o < irrev.steady_o - 0.05
 
 
 def test_bistability_branches():
-    """At beta = 4 (inside the bistable window) the steady state depends on
+    """At k_o_ads = 4 (inside the bistable window) the steady state depends on
     the initial condition: full-CO lattice stays CO-rich (branch I), empty
     lattice ends O-rich / CO-poor (branch II)."""
     common = dict(L=12, t_max=15.0, khop_scale=200.0, sample_interval=50_000)
-    hi = kmc.run_kmc(beta=4.0, init="full", seed=42, **common)
-    lo = kmc.run_kmc(beta=4.0, init="empty", seed=43, **common)
+    hi = kmc.run_kmc(k_o_ads=4.0, init="full", seed=42, **common)
+    lo = kmc.run_kmc(k_o_ads=4.0, init="empty", seed=43, **common)
     assert hi.steady_co > 0.45
     assert lo.steady_co < 0.25
     assert lo.steady_o > 0.4
@@ -183,8 +183,8 @@ def test_meanfield_bistable_window():
 
 
 def test_meanfield_langmuir_limit():
-    """beta = 0: single stable state at the Langmuir coverage, no O."""
-    ss = meanfield.steady_states(0.0, alpha=1.0, gamma=1.0)
+    """k_o_ads = 0: single stable state at the Langmuir coverage, no O."""
+    ss = meanfield.steady_states(0.0, k_co_ads=1.0, k_co_des=1.0)
     stable = [s for s in ss if s.stable]
     assert len(stable) == 1
     assert stable[0].theta_co == pytest.approx(0.5, abs=1e-9)
@@ -218,7 +218,7 @@ def test_jacobian_matches_finite_differences():
 
 
 def test_ea_mk_steady_states():
-    """Paper Fig. 3: at intermediate beta the Ea-MK model finds only the
+    """Paper Fig. 3: at intermediate k_o_ads the Ea-MK model finds only the
     low-CO branch II, unlike plain MF-MK."""
     ss = meanfield.steady_states(5.0, model="ea")
     for s in ss:
@@ -230,7 +230,7 @@ def test_ea_mk_steady_states():
 
 
 def test_meanfield_integration_reaches_steady_state():
-    ts, traj = meanfield.integrate((0.0, 0.0), beta=5.0, t_end=50.0, dt=1e-3)
+    ts, traj = meanfield.integrate((0.0, 0.0), k_o_ads=5.0, t_end=50.0, dt=1e-3)
     ss = meanfield.steady_states(5.0)
     lo = min((s for s in ss if s.stable), key=lambda s: s.theta_co)
     assert traj[-1, 0] == pytest.approx(lo.theta_co, abs=1e-4)

@@ -13,6 +13,8 @@ export OMP_NUM_THREADS=1
 
 source .venv/bin/activate
 
-# The $@ syntax in Bash forwards all parameters to sweep.mpi
-#   qsub -N -pe orte 24 big_tile submit_sweep_job.sh --memkm-sites 12 --out big
-mpirun -np 24 python -m sweeps.mpi "$@"
+# The $@ syntax in Bash forwards all parameters to sweep.mpi. $NSLOTS is set by SGE to
+# whatever count follows -pe orte at submission time, so the rank count always matches
+# what was actually granted instead of a number baked into this script.
+#   qsub -N big_tile -pe orte 24 submit_sweep_job.sh --memkm-sites 12 --out big
+mpirun -np "$NSLOTS" python -m sweeps.mpi "$@"

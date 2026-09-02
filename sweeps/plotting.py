@@ -1,415 +1,48 @@
-"""
-Plot: render the bifurcation and rate figures for a beta sweep.
+"""Plotting: the four kept plot families, all reading from the same StepResult/
+SweepResult/CoexistenceCrossing objects the Excel writer (sweeps.excel) uses.
 
-Reads a {out}_kmc_sweep.csv file (as written by sweeps/linear.py or
-sweeps/mpi.py) and the matching {out}_meanfield.csv branch file (the mean-field
-phase; if it is absent the branches are recomputed on the fly), then writes
-{out}_bifurcation.png (Fig. 3) and {out}_rates.png (Fig. 4) next to them. Fig. 3
-/ Fig. 4 style plots of Tian & Rangarajan (2021). delta = beta * 1e-4 by
-default, matching the sweeps' --delta-scale-beta flag.
+  - coverage maps    : plot_coverage_map      (population, psi_R_2, psi_L_2)
+  - eigenspectrum     : plot_eigenspectrum     (sorted/partitioned only)
+  - ratio curve       : plot_ratio_curve       (only when coexistence ran)
+  - bifurcation       : plot_bifurcation       (kMC + mean-field + ME-MKM vs one axis)
 
-Usage:
-    uv run python -m sweeps.plotting co_oxidation_kmc_sweep.csv
+plot_all orchestrates all four with the N-D grid faceting rule (see its docstring) and
+is what both the in-process --plot path (sweeps/linear.py, sweeps/mpi.py, on the live
+SweepResult) and the standalone replot CLI below (on a SweepResult read back from a
+saved .xlsx) call.
+
+Usage (standalone replot):
+    uv run python -m sweeps.plotting co_oxidation.xlsx
 """
 
 import argparse
 from pathlib import Path
 
-from matplotlib.collections import PatchCollection
-from matplotlib.patches import Rectangle
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import seaborn as sns
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Rectangle
 
-from co_oxidation import meanfield
+from .excel import read_workbook
+from .results import CoexistenceCrossing, MemkmStepResult, StepResult, SweepResult
 
 sns.set_theme(style="white", context="talk")
 
-# The mean-field branches are computed by the sweep's mean-field phase
-# (sweeps._common.run_meanfield); this module only draws them.
-from sweeps._common import (
-    DELTA_SCALE,
-    MEANFIELD_MODELS,
-    build_meanfield_betas,
-    run_meanfield,
-)
-
-MODEL_LABELS = {"mf": "MF-MK", "ea": "Ea-MK"}
+MODEL_LABELS = {"mf": "MF-MKM", "ea": "Bragg-Williams"}
 MODEL_COLORS = {"mf": None, "ea": "green"}
 
-def rates_dataframe(beta, theta_o, delta_scale=DELTA_SCALE, mf_physics=None):
-    """Fig. 4 rate curves vs theta_CO at fixed beta and theta_O.
 
-    `mf_physics` is the shared mean-field chemistry (alpha, gamma, kr, eps,
-    temperature); None uses meanfield.rates' defaults."""
-    mf_kw = dict(mf_physics or {})
-    if "temperature" in mf_kw:
-        mf_kw["T"] = mf_kw.pop("temperature")
-    theta_co = np.linspace(1e-4, 1.0 - theta_o - 1e-4, 200)
-    frames = []
-    for model in MEANFIELD_MODELS:
-        _, r_des_co, r_ads_o, r_oxi, _ = meanfield.rates(
-            theta_co, theta_o, beta, model=model, delta=beta * delta_scale,
-            **mf_kw)
-        frames.append(pd.DataFrame({
-            "model": model, "beta": beta, "theta_o": theta_o,
-            "theta_co": theta_co, "r_oxi": r_oxi, "r_ads_o": r_ads_o,
-            "r_des_co": np.broadcast_to(r_des_co, theta_co.shape),
-        }))
-    return pd.concat(frames, ignore_index=True)
-
-
-def plot_bifurcation(branches, sweep, path):
-    """Fig. 3 style plot: theta_CO and theta_O vs beta.
-
-    `branches` is the mean-field dataframe (as written to {out}_meanfield.csv);
-    pass None to draw only the kMC scatter points, e.g. when the mean-field
-    phase was skipped with --no-meanfield. When the sweep carries the ME-MKM
-    columns, the coverages conditioned on the two spectral macrostates are drawn
-    as well: they are the master-equation counterpart of the kMC hysteresis
-    branches, computed from a single ergodic steady state rather than from two
-    initial conditions.
-    """
-    L = int(sweep["L"].iloc[0])
-    fig, axes = plt.subplots(2, 1, figsize=(8, 9), sharex=True,
-                             layout="constrained")
-    for ax, col, ylabel in ((axes[0], "theta_co", r"$\theta_{CO}$"),
-                            (axes[1], "theta_o", r"$\theta_O$")):
-        if branches is not None:
-            for model in MEANFIELD_MODELS:
-                mdf = branches[branches["model"] == model]
-                label = MODEL_LABELS[model]
-                hi = mdf[mdf["branch"] == "stable_hi"].sort_values("beta")
-                lo = mdf[mdf["branch"] == "stable_lo"].sort_values("beta")
-                un = mdf[mdf["branch"] == "unstable"].sort_values("beta")
-                line, = ax.plot(hi["beta"], hi[col], "-",
-                                color=MODEL_COLORS[model], label=f"{label} stable")
-                ax.plot(lo["beta"], lo[col], "-", color=line.get_color())
-                ax.plot(un["beta"], un[col], "--", color=line.get_color(),
-                        label=f"{label} unstable")
-        key = "co" if col == "theta_co" else "o"
-        ax.scatter(sweep["beta"], sweep[f"{key}_full"], marker="o", zorder=5,
-                  label="kMC (CO-covered start)")
-        ax.scatter(sweep["beta"], sweep[f"{key}_empty"], marker="s", zorder=5,
-                  label="kMC (empty start)")
-        for basin, style in (("A", "-"), ("B", "--")):
-            memkm_col = f"memkm_{key}_{basin}"
-            if memkm_col not in sweep.columns:
-                continue
-            branch = sweep.dropna(subset=[memkm_col]).sort_values("beta")
-            if branch.empty:
-                continue
-            ax.plot(branch["beta"], branch[memkm_col], style, color="0.2",
-                    lw=1.4, zorder=4, label=f"ME-MKM basin {basin}")
-        ax.set_ylabel(ylabel)
-        ax.set_ylim(-0.02, 1.02)
-    axes[-1].set_xlabel(r"$\beta$ (O$_2$ impingement rate, s$^{-1}$)")
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, fontsize=9, ncol=3, loc="outside upper center")
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def plot_rates(rates, path):
-    """Fig. 4 style plot: log10(rate) vs theta_CO at fixed theta_O and beta."""
-    beta = rates["beta"].iloc[0]
-    theta_o = rates["theta_o"].iloc[0]
-    mf = rates[rates["model"] == "mf"].sort_values("theta_co")
-    ea = rates[rates["model"] == "ea"].sort_values("theta_co")
-    fig, ax = plt.subplots(figsize=(7, 5))
-    for col, label in (("r_oxi", "CO oxidation"), ("r_ads_o", "O2 adsorption"),
-                       ("r_des_co", "CO desorption")):
-        ax.plot(mf["theta_co"], np.log10(mf[col]), "-", label=f"{label} (MF-MK)")
-        ax.plot(ea["theta_co"], np.log10(ea[col]), "--", color="green",
-               label=f"{label} (Ea-MK)")
-    ax.set_xlabel(r"$\theta_{CO}$")
-    ax.set_ylabel("log10(rate)")
-    ax.legend(fontsize=8, ncol=3, loc="lower center",
-             bbox_to_anchor=(0.5, 1.02))
-    fig.suptitle(rf"Rate comparison at $\beta$={beta}, $\theta_O$={theta_o}",
-                y=1.1)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_trajectory(traj, path):
-    """Coverage-vs-time trajectories from empty and CO-covered starts."""
-    beta = traj["beta"].iloc[0]
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
-    for ax, init, title in ((axes[0], "empty", "empty start"),
-                            (axes[1], "full", "CO-covered start")):
-        tdf = traj[traj["init"] == init].sort_values("t")
-        ax.plot(tdf["t"], tdf["theta_CO"], label=r"$\theta_{CO}$")
-        ax.plot(tdf["t"], tdf["theta_O"], label=r"$\theta_O$")
-        ax.plot(tdf["t"], tdf["theta_empty"], label=r"$\theta_*$")
-        ax.set_xlabel("t (s)")
-        ax.set_title(title)
-    axes[0].set_ylabel("coverage")
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, fontsize=8, ncol=3, loc="lower center",
-              bbox_to_anchor=(0.5, 1.0))
-    fig.suptitle(rf"Coverage trajectories at $\beta$={beta}", y=1.08)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-def plot_coexistence(arrays, betas, cols, out_prefix, tag=""):
-    """The ME-MKM spectral diagnostics at one coexistence point beta*, from the
-    in-memory report arrays (see CoexistencePipeline.report). Writes several
-    {out_prefix}_coexistence{tag}_*.png figures. `betas`/`cols` are the full
-    sweep (the MEMKM_COLS dict), drawn as the basin-weight ratio curve and the
-    partition-validity continuity panel."""
-    beta_star = arrays["beta_star"]
-    eigvals = np.sort(arrays["eigvals"])[::-1] # most positive first, for the slowest modes
-    phi_slow = arrays["phi_slow"]
-    phi2 = arrays["phi2"]
-    theta = arrays["theta"]
-    phi_coord = arrays["phi_coord"]
-    in_A, in_B = arrays["in_A"], arrays["in_B"]
-    species = arrays["order_species"]
-    log_ratios = cols["log_ratio"]
-    palette = sns.color_palette("deep")
-    K = len(eigvals)
-    Ks = np.arange(1,K+1)
-
-    # 1. Eigenvalue spectrum (real / imaginary). Re(lambda) <= 0 for every mode
-    # but lambda_1 (the generator has no unstable direction), and most modes
-    # have Im(lambda) = 0 (only the handful of complex-conjugate pairs don't) --
-    # a plain 'log' scale drops every non-positive bar, which is why the old
-    # plot came out empty. symlog keeps the sign (so the negative real parts
-    # still read as negative) while going log-scale away from a linear band
-    # around zero sized to the smallest nonzero |eigenvalue|, so the many
-    # exactly-zero imaginary parts still draw as zero-height bars instead of
-    # disappearing.
-    fig, axes = plt.subplots(1, 2, figsize=(max(9.0, 0.3 * K), 5.5))
-    fig.suptitle(rf"Eigenvalues of $W$ at $\beta^*$ = {beta_star:.4g}")
-    axes[0].bar(Ks, eigvals.real)
-    axes[0].set_title("Real Component", fontsize=14)
-    axes[1].bar(Ks, eigvals.imag)
-    axes[1].set_title("Imaginary Component", fontsize=14)
-    max_yticks = 7
-    for ax, vals, label_all in zip(axes, [eigvals.real, eigvals.imag],
-                                   [True, False]):
-        nonzero_mask = vals != 0.0
-        nonzero = np.abs(vals[nonzero_mask])
-        linthresh = nonzero.min() if nonzero.size else 1.0
-        ax.set_yscale('symlog', linthresh=linthresh)
-        ax.axhline(0, color='k', lw=0.8)
-        # Every mode is informative for the real panel; the imaginary panel's
-        # exact zeros (every purely real mode) carry no information beyond
-        # "zero" and sit on top of each other at the axis, so only the modes
-        # that actually stick out get a tick label there.
-        shown = Ks if label_all else Ks[nonzero_mask]
-        ax.set_xticks(shown)
-        ax.set_xticklabels([rf"$\lambda_{{{i}}}$" for i in shown])
-        # Thin the symlog locator's one-tick-per-decade default down to a
-        # readable handful, keeping it symmetric about zero.
-        ticks = ax.yaxis.get_majorticklocs()
-        if len(ticks) > max_yticks:
-            keep = np.unique(np.linspace(0, len(ticks) - 1, max_yticks)
-                             .round().astype(int))
-            ticks = ticks[keep]
-        ax.set_yticks(ticks)
-    fig.tight_layout()
-    fig.savefig(f"{out_prefix}_coexistence{tag}_eigenvalues.png", dpi=150,
-                bbox_inches="tight")
-    plt.close(fig)
-
-    idx_A, idx_B = np.where(in_A)[0], np.where(in_B)[0]
-    idx_A = idx_A[np.argsort(phi2[idx_A])]
-    idx_B = idx_B[np.argsort(phi2[idx_B])]
-    state_order = np.concatenate([idx_A, idx_B])
-    x = np.concatenate([
-        np.linspace(0.0, 1.0, len(idx_A), endpoint=False),
-        1.0 + np.linspace(0.0, 1.0, len(idx_B), endpoint=False),
-    ])
-    n_panel = min(4, K)
-    fig, axes = plt.subplots(n_panel, 1, sharex=True, figsize=(7, 9))
-    fig.suptitle(rf"Slowest left eigenvectors of $W$ at $\beta^*$ = {beta_star:.4g}")
-    for m, ax in enumerate(np.atleast_1d(axes)):
-        lam = eigvals[m]
-        psi = phi_slow[:, m].real
-        if np.dot(psi, phi2) < 0:
-            psi = -psi
-        psi = psi / np.max(np.abs(psi))
-        # Draw the two basins as separate segments so a basin holding only a
-        # handful of microstates (a line plot renders a single point as
-        # nothing) still shows up, via markers.
-        nA = len(idx_A)
-        for x_seg, psi_seg in ((x[:nA], psi[state_order][:nA]),
-                               (x[nA:], psi[state_order][nA:])):
-            if len(x_seg) == 0:
-                continue
-            ax.plot(x_seg, psi_seg, lw=0.9, color=palette[m],
-                    marker="o" if len(x_seg) < 20 else None, ms=4)
-        ax.axhline(0.0, color="0.8", lw=0.8)
-        ax.set_ylabel(rf"$\phi_{m + 1}^L$")
-        label = rf"$\lambda_{m + 1}$ = {lam.real:.3e}"
-        if abs(lam.imag) > 1e-8 * max(abs(lam.real), 1e-300):
-            label += rf" (Im = {lam.imag:.1e}!)"
-        ax.text(0.02, 0.85, label, transform=ax.transAxes, fontsize=9)
-        ax.set_xlim(0.0, 2.0)
-        ax.set_xticks([0.0, 1.0, 2.0])
-        ax.set_xticklabels([])
-        ax.set_xticks([0.5, 1.5], minor=True)
-        ax.set_xticklabels(["A", "B"], minor=True)
-        ax.tick_params(axis="x", which="minor", length=0)
-    fig.savefig(f"{out_prefix}_coexistence{tag}_eigenvectors.png", dpi=150,
-                bbox_inches="tight")
-    plt.close(fig)
-
-    # 3. Coverage marginal of the ordering species at beta*.
-    marginal = arrays["marginal"]
-    fig, ax = plt.subplots()
-    ax.plot(np.arange(len(marginal)), marginal, "-o", color=palette[0])
-    ax.set_yscale("log")
-    ax.set_xlabel(rf"$N_\mathrm{{{species}}}$")
-    ax.set_ylabel(rf"$P(N_\mathrm{{{species}}})$")
-    fig.suptitle(rf"{species}-count marginal at $\beta^*$ = {beta_star:.4g}")
-    fig.savefig(f"{out_prefix}_coexistence{tag}_marginal.png", dpi=150,
-                bbox_inches="tight")
-    plt.close(fig)
-
-    # 4. Stationary density on the slow coordinate.
-    sort_idx = np.argsort(phi_coord)
-    pmf, edges = np.histogram(phi_coord[sort_idx], bins=50, weights=theta[sort_idx])
-    fig, ax = plt.subplots()
-    ax.stairs(pmf, edges, fill=True, color=palette[0])
-    ax.set_yscale("log")
-    ax.set_xlabel(r"slow coordinate $\phi_2^L$")
-    ax.set_ylabel(r"$\rho(\phi_2^L)$")
-    fig.suptitle(rf"Stationary density on the slow mode at $\beta^*$ = {beta_star:.4g}")
-    fig.savefig(f"{out_prefix}_coexistence{tag}_slow-coordinate.png", dpi=150,
-                bbox_inches="tight")
-    plt.close(fig)
-
-    # 5. Basin-weight curves over the sweep, marking beta*: the objective
-    #    ln pi(A)/pi(B) and the weights themselves, whose crossing at 1/2 is
-    #    the coexistence definition.
-    betas = np.asarray(betas, float)
-    log_ratios = np.asarray(log_ratios, float)
-    good = np.isfinite(log_ratios)
-    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(7, 7))
-    axes[0].plot(betas[good], log_ratios[good], "-o", color=palette[0])
-    axes[0].axhline(0.0, color="0.6", lw=1)
-    axes[0].annotate(rf"$\beta^*$ = {beta_star:.4g}", (beta_star, 0.0),
-                     textcoords="offset points", xytext=(8, 8))
-    axes[0].set_ylabel(r"$\ln\,p_{ss}(A)/p_{ss}(B)$")
-    P_A = np.asarray(cols["memkm_P_A"], float)
-    ok = np.isfinite(P_A)
-    axes[1].plot(betas[ok], P_A[ok], "-o", color=palette[0], label=r"$P_A$")
-    axes[1].plot(betas[ok], 1.0 - P_A[ok], "-o", color=palette[1], label=r"$P_B$")
-    axes[1].axhline(0.5, color="0.6", lw=1)
-    axes[1].set_ylabel("spectral macrostate weight")
-    axes[1].set_ylim(-0.02, 1.02)
-    axes[1].legend(fontsize=8)
-    for ax in axes:
-        ax.axvline(beta_star, color="0.6", lw=1, ls="--")
-    axes[-1].set_xlabel(r"$\beta$")
-    fig.suptitle("Spectral macrostate weights vs. adsorption rate")
-    fig.tight_layout()
-    fig.savefig(f"{out_prefix}_coexistence{tag}_ratio-curve.png", dpi=150,
-                bbox_inches="tight")
-    plt.close(fig)
-
-    # 6. Continuity / validity of the partition across the sweep.
-    plot_partition_diagnostics(betas, cols, beta_star, out_prefix, tag=tag)
-
-    # 7. Coverage-class map over (N_CO, N_O).
-    if "cov_pop" in arrays:
-        plot_coverage_map(arrays, out_prefix, tag=tag)
-
-
-def plot_partition_diagnostics(betas, cols, beta_star, out_prefix, tag=""):
-    """Whether the two-state reading actually holds across the sweep, from the
-    per-beta MEMKM_COLS: the two slowest eigenvalues and their gap, the
-    stationary mass sitting on the sign boundary, the overlap of consecutive
-    slow modes, and the conditional coverages of the two macrostates."""
-    betas = np.asarray(betas, float)
-    palette = sns.color_palette("deep")
-
-    def finite(key):
-        y = np.asarray(cols[key], float)
-        m = np.isfinite(y)
-        return betas[m], y[m]
-
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7.5), sharex=True)
-    ax = axes[0, 0]
-    for key, label, color in (("lambda2_re", r"$|\mathrm{Re}\,\lambda_2|$", 0),
-                              ("lambda3_re", r"$|\mathrm{Re}\,\lambda_3|$", 1)):
-        x, y = finite(key)
-        ax.plot(x, np.abs(y), "-o", ms=3, color=palette[color], label=label)
-    ax.set_yscale("log")
-    ax.set_ylabel("relaxation rate, s$^{-1}$")
-    ax.legend(fontsize=8)
-
-    ax = axes[0, 1]
-    x, y = finite("spectral_gap")
-    ax.plot(x, y, "-o", ms=3, color=palette[0])
-    ax.axhline(1.0, color="0.6", lw=1)
-    ax.set_yscale("log")
-    ax.set_ylabel(r"gap $|\mathrm{Re}\,\lambda_3 / \mathrm{Re}\,\lambda_2|$")
-    ax.set_title("large = one slow process controls the split", fontsize=9)
-
-    # Exact zeros are common and meaningful here (no ambiguous weight at all, a
-    # perfectly continued mode), so they are drawn on the floor of the log axis
-    # rather than dropped, and the floor is set a decade under the smallest
-    # positive value so the informative range keeps the height of the panel.
-    def _floored(y, default=1e-12):
-        positive = y[y > 0.0]
-        floor = positive.min() / 10.0 if positive.size else default
-        return np.maximum(y, floor), floor
-
-    ax = axes[1, 0]
-    x, y = finite("boundary_mass")
-    y, floor = _floored(y)
-    ax.plot(x, y, "-o", ms=3, color=palette[0])
-    ax.set_yscale("log")
-    ax.set_ylim(bottom=floor / 2)
-    ax.set_ylabel(r"$P_\mathrm{boundary}$")
-    ax.set_xlabel(r"$\beta$")
-    im_re = np.asarray(cols["im_re_ratio"], float)
-    worst = np.nanmax(im_re) if np.isfinite(im_re).any() else np.nan
-    ax.set_title(rf"max $|\mathrm{{Im}}\,\lambda_2/\mathrm{{Re}}\,\lambda_2|$ = "
-                 rf"{worst:.1e} (real mode required)", fontsize=9)
-
-    # Plotted as 1 - overlap: the overlaps themselves sit at 0.9999... where a
-    # linear axis resolves nothing. A sign flip shows up as a value near 2.
-    ax = axes[1, 1]
-    x, y = finite("mode_overlap")
-    y, floor = _floored(1.0 - y)
-    ax.plot(x, y, "-o", ms=3, color=palette[0])
-    ax.set_yscale("log")
-    ax.set_ylim(bottom=floor / 2)
-    ax.set_ylabel(r"$1-\langle \phi_2^R(\beta_k), \phi_2^R(\beta_{k-1})\rangle$")
-    ax.set_xlabel(r"$\beta$")
-    ax.set_title("spike (or a value near 2, a sign flip) = mode crossing",
-                 fontsize=9)
-
-    for ax in axes.ravel():
-        ax.axvline(beta_star, color="0.6", lw=1, ls="--")
-    fig.suptitle("Validity of the spectral two-state partition")
-    fig.tight_layout()
-    fig.savefig(f"{out_prefix}_coexistence{tag}_partition-diagnostics.png",
-                dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
+# --- coverage maps ---------------------------------------------------------------
 
 def _coverage_pcolor(ax, grid, l, cmap, norm=None, vmin=None, vmax=None):
-    """Draw one coverage-class grid on `ax` as a brick-stack pyramid: row N_O
-    (of length l+1-N_O) is offset right by N_O/2 as a whole, centering it
-    under the full-width N_O=0 row, so the accessible region reads as a
-    symmetric triangle of unit *squares* -- not a sheared parallelogram mesh,
-    where the offset would vary between a cell's own top and bottom edges and
-    leave every cell a slightly slanted trapezoid. Each valid (n_CO, n_O)
-    class is one square, drawn individually since adjacent rows don't share
-    edges (this is a staggered brick wall, not a connected grid)."""
+    """Draw one coverage-class grid on `ax` as a brick-stack pyramid: row N_O (of
+    length l+1-N_O) is offset right by N_O/2 as a whole, centering it under the
+    full-width N_O=0 row, so the accessible region reads as a symmetric triangle of
+    unit *squares*. Each valid (n_CO, n_O) class is one square, drawn individually."""
     n_co, n_o = np.where(np.isfinite(grid))
     vals = grid[n_co, n_o]
-    squares = [Rectangle((co + o / 2 - 0.5, o - 0.5), 1, 1)
-              for co, o in zip(n_co, n_o)]
+    squares = [Rectangle((co + o / 2 - 0.5, o - 0.5), 1, 1) for co, o in zip(n_co, n_o)]
     im = PatchCollection(squares, cmap=cmap, edgecolor="0.35", linewidth=1.2)
     im.set_array(vals)
     if norm is not None:
@@ -417,15 +50,10 @@ def _coverage_pcolor(ax, grid, l, cmap, norm=None, vmin=None, vmax=None):
     else:
         im.set_clim(vmin, vmax)
     ax.add_collection(im)
-    # Base (N_O=0 row) and total height both span l+1 data units, so an
-    # "equal" aspect draws a triangle taller than it is wide (height/base=1
-    # vs. sqrt(3)/2 for equilateral). Squashing the y-unit by sqrt(3)/2 fixes
-    # the overall proportions while keeping each class an axis-aligned
-    # rectangle rather than shearing the mesh.
     ax.set_aspect(np.sqrt(3) / 2)
     ax.set_xlabel(r"$N_\mathrm{CO}$")
     ax.set_ylabel(r"$N_\mathrm{O}$")
-    ax.set_xticks([])                            # x no longer maps 1:1 to N_CO once shifted
+    ax.set_xticks([])
     ax.set_yticks(np.arange(0, l + 1))
     ax.set_xlim(-0.5, l + 0.5)
     ax.set_ylim(-0.5, l + 0.5)
@@ -433,154 +61,372 @@ def _coverage_pcolor(ax, grid, l, cmap, norm=None, vmin=None, vmax=None):
 
 
 def _inset_colorbar(fig, ax, im, label=None):
-    """A colorbar sized to match its axes. Goes through fig.colorbar(ax=...)
-    rather than the axes_grid1 divider trick, since these figures use
-    constrained_layout=True and the layout engine only reserves space for
-    colorbars it knows about -- an axes_grid1 divider axes is invisible to it
-    and ends up drawn on top of whatever is already there."""
     return fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=label)
 
 
-def plot_coverage_map(arrays, out_prefix, tag=""):
-    """Coverage-class maps over the (N_CO, N_O) plane at beta*, in three figures,
-    all the same size and dpi so they line up as a set:
+def _diverging_norm(grid, center=0.0):
+    if np.isfinite(grid).any() and np.nanmin(grid) < 0 < np.nanmax(grid):
+        from matplotlib.colors import TwoSlopeNorm
+        return TwoSlopeNorm(vcenter=center, vmin=np.nanmin(grid), vmax=np.nanmax(grid))
+    return None
 
-      {..}_coverage-population.png : the stationary marginal P(N_CO, N_O) =
-        sum_i pi_i, which states are populated (the two basins + transition
-        valley),
-      {..}_coverage-r2.png  : the slow right mode sum phi_2^R (whose *sign* is
-        the macrostate partition),
-      {..}_coverage-phi2.png : the unweighted class-mean slow left mode
-        <phi_2^L>, the reaction coordinate.
 
-    Cells are centered on integer (N_CO, N_O); the inaccessible corner
-    (N_CO + N_O > l) and empty classes are masked."""
-    from matplotlib.colors import TwoSlopeNorm
-
-    beta_star = arrays["beta_star"]
-    l = arrays["n_sites"]
-    pop = arrays["cov_pop"]
-    phi = arrays["cov_phi"]
-    r2map = arrays["cov_r2"]   # class sums of r_2; sign = partition
-
-    deg = arrays["cov_deg"]
+def plot_coverage_map(memkm: MemkmStepResult, out_path_prefix: str) -> list[str]:
+    """Coverage-class maps over (N_CO, N_O): population, the slow right mode sum
+    (psi_R_2, whose sign is the macrostate partition), and the slow left mode class
+    mean (psi_L_2, the reaction coordinate -- skipped if not solved)."""
+    l = memkm.n_sites
     a = np.arange(l + 1)
     outside = (a[:, None] + a[None, :]) > l
-    pop_m = np.where((pop > 0) & ~outside, pop, np.nan)
-    empty = outside | (deg <= 0)
-    phi_m = np.where(outside, np.nan, phi)
-    r2_m = np.where(empty, np.nan, r2map)
-
+    pop_m = np.where((memkm.cov_pop > 0) & ~outside, memkm.cov_pop, np.nan)
+    empty = outside | (memkm.cov_deg <= 0)
+    r2_m = np.where(empty, np.nan, memkm.cov_r2)
     figsize, dpi = (12, 5.5), 150
+    written = []
 
-    # Figure 1: stationary population.
     fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
     im0 = _coverage_pcolor(ax, pop_m, l, "Blues")
-    ax.set_title(rf"Stationary Distribution by Coverage-class at $\beta^*$ = {beta_star:.4g}",
-                pad=10)
+    ax.set_title("Stationary Distribution by Coverage-class", pad=10)
     _inset_colorbar(fig, ax, im0, label=r"$P(N_\mathrm{CO}, N_\mathrm{O})$")
-    fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-population.png",
-                dpi=dpi, bbox_inches="tight")
+    path = f"{out_path_prefix}_coverage-population.png"
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
-
-    # Figures 2 and 3: the partition (r_2) and the reaction coordinate
-    # (phi_2^L), split into their own figures so each stands alone, but which
-    # should both place the dividing surface in the same place.
-    def _diverging(grid, center=0.0):
-        if np.isfinite(grid).any() and np.nanmin(grid) < 0 < np.nanmax(grid):
-            return TwoSlopeNorm(vcenter=center, vmin=np.nanmin(grid),
-                                vmax=np.nanmax(grid))
-        return None
+    written.append(path)
 
     fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
-    im0 = _coverage_pcolor(ax, r2_m, l, "coolwarm", norm=_diverging(r2_m))
-    ax.set_title(rf"Slowest Relaxation Mode $\phi_2^R(n_\mathrm{{CO}},n_\mathrm{{O}})$ "
-                 rf"at $\beta^*$ = {beta_star:.4g}", pad=10)
-    _inset_colorbar(fig, ax, im0, label=r"$\phi_2^R(n_\mathrm{CO},n_\mathrm{O})$")
-    fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-r2.png",
-                dpi=dpi, bbox_inches="tight")
+    im1 = _coverage_pcolor(ax, r2_m, l, "coolwarm", norm=_diverging_norm(r2_m))
+    ax.set_title(r"Slowest Relaxation Mode $\Psi_2^R(n_\mathrm{CO},n_\mathrm{O})$", pad=10)
+    _inset_colorbar(fig, ax, im1, label=r"$\Psi_2^R(n_\mathrm{CO},n_\mathrm{O})$")
+    path = f"{out_path_prefix}_coverage-psi_R_2.png"
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
+    written.append(path)
 
-    fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
-    im1 = _coverage_pcolor(ax, phi_m, l, "coolwarm", norm=_diverging(phi_m))
-    ax.set_title(rf"Reaction Coordinate $\phi_2^L(n_\mathrm{{CO}},n_\mathrm{{O}})$ "
-                 rf"at $\beta^*$ = {beta_star:.4g}", pad=10)
-    _inset_colorbar(fig, ax, im1, label=r"$\phi_2^L(n_\mathrm{CO},n_\mathrm{O})$")
-    fig.savefig(f"{out_prefix}_coexistence{tag}_coverage-phi2.png",
-                dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
+    if memkm.cov_phi is not None:
+        phi_m = np.where(outside, np.nan, memkm.cov_phi)
+        fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
+        im2 = _coverage_pcolor(ax, phi_m, l, "coolwarm", norm=_diverging_norm(phi_m))
+        ax.set_title(r"Reaction Coordinate $\Psi_2^L(n_\mathrm{CO},n_\mathrm{O})$", pad=10)
+        _inset_colorbar(fig, ax, im2, label=r"$\Psi_2^L(n_\mathrm{CO},n_\mathrm{O})$")
+        path = f"{out_path_prefix}_coverage-psi_L_2.png"
+        fig.savefig(path, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        written.append(path)
 
-
-def plot_sweep(sweep, out_prefix, branches=None, delta_scale=DELTA_SCALE,
-               rates_beta=4.0, rates_theta_o=0.01, mf_physics=None):
-    """Bifurcation + rate figures from a sweep dataframe, at the delta the
-    sweep actually used.
-
-    `branches` is the precomputed mean-field dataframe (the mean-field phase's
-    {out}_meanfield.csv). When it is None the mean-field lines and the rate
-    figure are skipped and only the kMC scatter bifurcation is drawn.
-    `mf_physics` is the shared mean-field chemistry used to recompute the rate
-    curves. Writes {out_prefix}_bifurcation.png and, when branches are
-    available, _rates.png.
-    """
-    plot_bifurcation(branches, sweep, f"{out_prefix}_bifurcation.png")
-    written = [f"{out_prefix}_bifurcation.png"]
-    if branches is not None:
-        plot_rates(rates_dataframe(rates_beta, rates_theta_o, delta_scale,
-                                   mf_physics=mf_physics),
-                   f"{out_prefix}_rates.png")
-        written.append(f"{out_prefix}_rates.png")
     return written
 
 
+# --- eigenspectrum -----------------------------------------------------------------
+
+_EIGENSPECTRUM_KEYS = ("phi_slow", "vecs_R", "psi_L_2", "psi_R_2", "theta", "in_A", "in_B")
+
+
+def plot_eigenspectrum(arrays: dict, out_path: str) -> str | None:
+    """Sorted/partitioned eigenspectrum: the eigenvalue bar chart on top, the slowest
+    left eigenvectors in the left column and right eigenvectors in the right column,
+    each basin drawn as its own segment split at the A/B boundary.
+
+    Needs the raw per-microstate arrays from CoexistencePipeline.report() -- present
+    when plotting chains directly off a live SweepResult, but not reconstructable from
+    a saved .xlsx (sweeps.excel only carries the adsorbate-count joint distributions,
+    not the per-microstate vectors), in which case this prints a note and returns None.
+    """
+    if any(k not in arrays for k in _EIGENSPECTRUM_KEYS):
+        print(f"  [plot] skipping eigenspectrum for {out_path}: per-microstate "
+              "eigenvectors not available (likely loaded from a saved workbook)")
+        return None
+
+    eigvals = np.sort(arrays["eigvals"])[::-1].copy()
+    eigvals.real[np.abs(eigvals.real) < 1e-12] = 0.0
+    eigvals.imag[np.abs(eigvals.imag) < 1e-12] = 0.0
+    phi_slow, vecs_R = arrays["phi_slow"], arrays["vecs_R"]
+    psi_L_2, psi_R_2 = arrays["psi_L_2"], arrays["psi_R_2"]
+    in_A, in_B = arrays["in_A"], arrays["in_B"]
+    palette = sns.color_palette("deep")
+    K = len(eigvals)
+    Ks = np.arange(1, K + 1)
+
+    idx_A, idx_B = np.where(in_A)[0], np.where(in_B)[0]
+    idx_A = idx_A[np.argsort(psi_L_2[idx_A])]
+    idx_B = idx_B[np.argsort(psi_L_2[idx_B])]
+    state_order = np.concatenate([idx_A, idx_B])
+    x = np.concatenate([
+        np.linspace(0.0, 1.0, len(idx_A), endpoint=False),
+        1.0 + np.linspace(0.0, 1.0, len(idx_B), endpoint=False),
+    ])
+    n_panel = K
+    n_panel_R = min(n_panel, vecs_R.shape[1])
+    row_h, width, top_units = 2, 11.0, 2
+    nA = len(idx_A)
+
+    fig = plt.figure(figsize=(width, row_h * (n_panel + top_units)),
+                     constrained_layout=True)
+    gs = fig.add_gridspec(n_panel + 1, 2, hspace=0.05, wspace=0.05,
+                          height_ratios=[top_units] + [1] * n_panel)
+    ax_re = fig.add_subplot(gs[0, :])
+    bars = ax_re.bar(Ks, eigvals.real, color=[palette[m] for m in range(K)])
+    bar_labels = [f"{v:.2f}" if v != 0.0 else "" for v in eigvals.real]
+    ax_re.bar_label(bars, labels=bar_labels, label_type="center")
+    ax_re.set_title("Real Component of Eigenvalues")
+    max_yticks = 3
+    nonzero = np.abs(eigvals.real[eigvals.real != 0.0])
+    linthresh = nonzero.min() if nonzero.size else 1.0
+    ax_re.set_yscale("symlog", linthresh=linthresh)
+    ax_re.set_ylim(top=linthresh)
+    ax_re.axhline(0, color="k", lw=0.8)
+    ax_re.set_xticks(Ks)
+    ax_re.set_xticklabels([rf"$\lambda_{{{i}}}$" for i in Ks])
+    ticks = ax_re.yaxis.get_majorticklocs()
+    ticks = ticks[np.abs(ticks) > linthresh]
+    if len(ticks) > max_yticks:
+        keep = np.unique(np.linspace(0, len(ticks) - 1, max_yticks).round().astype(int))
+        ticks = ticks[keep]
+    ax_re.set_yticks(ticks)
+
+    def _draw_column(col, vecs, n_col, symbol, sign_ref, sharex):
+        axes = [fig.add_subplot(gs[1, col], sharex=sharex)]
+        axes += [fig.add_subplot(gs[i + 1, col], sharex=axes[0], sharey=axes[0])
+                for i in range(1, n_col)]
+        for m, ax in enumerate(axes):
+            psi = vecs[:, m].real
+            if np.dot(psi, sign_ref) < 0:
+                psi = -psi
+            for x_seg, psi_seg in ((x[:nA], psi[state_order][:nA]),
+                                   (x[nA:], psi[state_order][nA:])):
+                if len(x_seg) == 0:
+                    continue
+                ax.plot(x_seg, psi_seg, lw=0.9, color=palette[m],
+                        marker="o" if len(x_seg) < 20 else None, ms=3)
+            ax.axhline(0.0, color="0.8", lw=0.8)
+            ax.axvline(1.0, color="black", ls="--", lw=1.0)
+            ax.set_title(rf"$\Psi_{m + 1}^{symbol}$")
+            ax.set_xlim(0.0, 2.0)
+            ax.set_xticks([0.0, 1.0, 2.0])
+            ax.set_xticklabels([])
+            ax.tick_params(axis="x", which="minor", length=0, labelbottom=False)
+        axes[-1].set_xticks([0.5, 1.5], minor=True)
+        axes[-1].set_xticklabels([r"$\Psi_2^R < 0$", r"$\Psi_2^R \geq 0$"], minor=True)
+        axes[-1].tick_params(axis="x", which="minor", labelbottom=True)
+        return axes
+
+    eig_axes_L = _draw_column(0, phi_slow, n_panel, "L", psi_L_2, sharex=None)
+    _draw_column(1, vecs_R, n_panel_R, "R", psi_R_2, sharex=eig_axes_L[0])
+
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
+# --- ratio curve ---------------------------------------------------------------------
+
+def plot_ratio_curve(crossing: CoexistenceCrossing, out_path: str) -> str:
+    """Basin log-ratio and P_A/P_B vs. the bisection axis, marking the coexistence
+    point. P_A is recovered from the log-ratio scan via the logistic identity
+    P_A = 1/(1+exp(-log_ratio)), since log_ratio = ln(P_A/P_B) and P_A+P_B=1."""
+    x = np.asarray(crossing.scan_values, float)
+    lr = np.asarray(crossing.scan_log_ratios, float)
+    good = np.isfinite(lr)
+    order = np.argsort(x[good])
+    x_good, lr_good = x[good][order], lr[good][order]
+    palette = sns.color_palette("deep")
+
+    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(7, 7))
+    axes[0].plot(x_good, lr_good, "-o", color=palette[0])
+    axes[0].axhline(0.0, color="0.6", lw=1)
+    axes[0].annotate(rf"{crossing.bisection_axis}* = {crossing.value_star:.4g}",
+                     (crossing.value_star, 0.0), textcoords="offset points",
+                     xytext=(8, 8))
+    axes[0].set_ylabel(r"$\ln\,p_{ss}(A)/p_{ss}(B)$")
+    axes[0].set_title(f"Spectral macrostate weights vs. {crossing.bisection_axis}")
+
+    P_A = 1.0 / (1.0 + np.exp(-lr_good))
+    axes[1].plot(x_good, P_A, "-o", color=palette[0], label=r"$P_A$")
+    axes[1].plot(x_good, 1.0 - P_A, "-o", color=palette[1], label=r"$P_B$")
+    axes[1].axhline(0.5, color="0.6", lw=1)
+    axes[1].set_ylabel("spectral macrostate weight")
+    axes[1].set_ylim(-0.02, 1.02)
+    axes[1].legend()
+    for ax in axes:
+        ax.axvline(crossing.value_star, color="0.6", lw=1, ls="--")
+    axes[-1].set_xlabel(crossing.bisection_axis)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
+# --- bifurcation ---------------------------------------------------------------------
+
+def plot_bifurcation(steps: list[StepResult], plot_axis: str, out_path: str,
+                     title: str | None = None) -> str:
+    """kMC hysteresis scatter + MF-MKM/Bragg-Williams branch lines (steady-state
+    proxy: the last time-sample of each model's empty/full trajectory) + ME-MKM
+    spectral-basin coverages, vs. plot_axis, over one group of steps (every other
+    swept axis fixed within the group)."""
+    ordered = sorted(steps, key=lambda s: s.step.config.__dict__[plot_axis])
+    xs = np.array([s.step.config.__dict__[plot_axis] for s in ordered], float)
+
+    fig, axes = plt.subplots(2, 1, figsize=(8, 9), sharex=True, layout="constrained")
+    for ax, key, ylabel in ((axes[0], "co", r"$\theta_{CO}$"),
+                            (axes[1], "o", r"$\theta_O$")):
+        for model, label in MODEL_LABELS.items():
+            full_x, full_y, empty_x, empty_y = [], [], [], []
+            for x, s in zip(xs, ordered):
+                if s.meanfield is None:
+                    continue
+                for r in s.meanfield:
+                    if r.model != model:
+                        continue
+                    val = (r.theta_co if key == "co" else r.theta_o)[-1]
+                    (full_x if r.tag == "full" else empty_x).append(x)
+                    (full_y if r.tag == "full" else empty_y).append(val)
+            color = MODEL_COLORS[model]
+            if full_x:
+                line, = ax.plot(full_x, full_y, "-", color=color,
+                               label=f"{label} (CO start)")
+                color = line.get_color()
+            if empty_x:
+                ax.plot(empty_x, empty_y, "--", color=color, label=f"{label} (empty start)")
+
+        for tag, marker, marker_label in (("full", "o", "CO-covered start"),
+                                          ("empty", "s", "empty start")):
+            kx, ky = [], []
+            for x, s in zip(xs, ordered):
+                if s.kmc is None:
+                    continue
+                for t in s.kmc:
+                    if t.tag != tag:
+                        continue
+                    kx.append(x)
+                    ky.append(t.steady_co if key == "co" else t.steady_o)
+            if kx:
+                ax.scatter(kx, ky, marker=marker, zorder=5, label=f"kMC ({marker_label})")
+
+        for basin, style in (("a", "-"), ("b", "--")):
+            mx, my = [], []
+            for x, s in zip(xs, ordered):
+                if s.memkm is None:
+                    continue
+                mx.append(x)
+                my.append(getattr(s.memkm, f"{key}_{basin}"))
+            if mx:
+                ax.plot(mx, my, style, color="0.2", lw=1.4, zorder=4,
+                       label=f"ME-MKM basin {basin.upper()}")
+
+        ax.set_ylabel(ylabel)
+        ax.set_ylim(-0.02, 1.02)
+    axes[-1].set_xlabel(plot_axis)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, ncol=3, loc="outside upper center")
+    if title:
+        fig.suptitle(title)
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return out_path
+
+
+# --- orchestration + N-D faceting ------------------------------------------------------
+
+def group_steps(steps: list[StepResult], plot_axis: str) -> list[tuple[dict, list[StepResult]]]:
+    """Group `steps` by the value-tuple of every swept axis EXCEPT plot_axis; one
+    group == one facet/figure. A grid with plot_axis as the only swept axis yields
+    exactly one group."""
+    other_names = sorted({n for s in steps for n in s.step.axis_values if n != plot_axis})
+    groups: dict[tuple, list[StepResult]] = {}
+    order = []
+    for s in steps:
+        key = tuple(s.step.axis_values[n] for n in other_names)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(s)
+    return [(dict(zip(other_names, key)), groups[key]) for key in order]
+
+
+def _resolve_plot_axis(result: SweepResult, plot_axis: str | None) -> str | None:
+    if plot_axis:
+        return plot_axis
+    if result.coexistence:
+        return result.coexistence[0].bisection_axis
+    if len(result.grid.axes) == 1:
+        return result.grid.axes[0].name
+    return None
+
+
+def plot_all(result: SweepResult, out_prefix: str, plot_axis: str | None = None,
+            plot_memkm_steps: str | None = None) -> list[str]:
+    """Concrete N-D faceting rule:
+      - plot_axis resolves (see _resolve_plot_axis) to the coexistence bisection axis
+        if coexistence ran, else the explicit argument, else the sole swept axis; with
+        more than one swept axis and no coexistence, an explicit plot_axis is required.
+      - bifurcation: one figure per group from group_steps(); "{out}_bifurcation.png"
+        if there's exactly one group, else "_g{i}.png" (the fixed axis=value context
+        for that group is printed and put in the figure title; still traceable via
+        the workbook's Grid sheet by step index).
+      - ratio-curve: one figure per CoexistenceCrossing (each already is one
+        outer-axis slice), only produced when coexistence ran.
+      - eigenspectrum + coverage maps: per-step/per-crossing snapshots, not grouped by
+        axis. If coexistence ran: one snapshot per crossing (on by default). Otherwise:
+        skipped by default (still exported to Excel regardless) unless
+        plot_memkm_steps is "all" or a comma-separated list of step indices.
+    """
+    written = []
+    axis = _resolve_plot_axis(result, plot_axis)
+    if axis is None:
+        print("  [plot] no plot axis resolved (more than one swept axis and no "
+              "coexistence ran); pass --plot-axis to enable bifurcation/ratio-curve "
+              "plots. Skipping.")
+    else:
+        groups = group_steps(result.steps, axis)
+        for i, (fixed, group) in enumerate(groups):
+            suffix = "" if len(groups) == 1 else f"_g{i}"
+            path = f"{out_prefix}_bifurcation{suffix}.png"
+            title = ", ".join(f"{k}={v:g}" for k, v in fixed.items()) or None
+            if title:
+                print(f"  [plot] group {i}: {title}")
+            written.append(plot_bifurcation(group, axis, path, title=title))
+
+    if result.coexistence:
+        for i, crossing in enumerate(result.coexistence):
+            tag = "" if len(result.coexistence) == 1 else f"_{i}"
+            written.append(plot_ratio_curve(crossing, f"{out_prefix}_ratio-curve{tag}.png"))
+            snap_prefix = f"{out_prefix}_coexistence{tag}"
+            written.extend(plot_coverage_map(MemkmStepResult(
+                eigvals=crossing.arrays["eigvals"], cov_pop=crossing.arrays["cov_pop"],
+                cov_r2=crossing.arrays["cov_r2"], cov_phi=crossing.arrays["cov_phi"],
+                cov_deg=crossing.arrays["cov_deg"], theta_empty=0.0, theta_co=0.0,
+                theta_o=0.0, n_sites=crossing.arrays["n_sites"], p_a=crossing.row["P_A"],
+                empty_a=0.0, co_a=0.0, o_a=0.0, empty_b=0.0, co_b=0.0, o_b=0.0),
+                snap_prefix))
+            eig_path = plot_eigenspectrum(crossing.arrays, f"{snap_prefix}_eigenspectrum.png")
+            if eig_path:
+                written.append(eig_path)
+    elif plot_memkm_steps:
+        wanted = (None if plot_memkm_steps.strip().lower() == "all"
+                 else {int(v) for v in plot_memkm_steps.split(",")})
+        for s in result.steps:
+            if s.memkm is None or (wanted is not None and s.step.index not in wanted):
+                continue
+            snap_prefix = f"{out_prefix}_S{s.step.index}"
+            written.extend(plot_coverage_map(s.memkm, snap_prefix))
+
+    return [p for p in written if p]
+
+
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("csv", help="path to a {out}_kmc_sweep.csv file")
-    ap.add_argument("--meanfield-beta-step", "--beta-fine-step",
-                    dest="meanfield_beta_step", type=float, default=0.05,
-                    help="fill-in beta grid step used only when no "
-                         "{out}_meanfield.csv is found and the branches must "
-                         "be recomputed")
-    ap.add_argument("--rates-beta", type=float, default=4.0,
-                    help="fixed beta for the Fig. 4 rate plot")
-    ap.add_argument("--rates-theta-o", type=float, default=0.01,
-                    help="fixed theta_O for the Fig. 4 rate plot")
+    ap = argparse.ArgumentParser(
+        description="Replot the four kept figures from a saved sweep workbook.")
+    ap.add_argument("xlsx", help="path to a sweep .xlsx workbook")
+    ap.add_argument("--plot-axis", default=None)
+    ap.add_argument("--plot-memkm-steps", default=None,
+                    help='"all" or comma-separated step indices')
     args = ap.parse_args()
 
-    p = Path(args.csv)
-    dir = p.parents[0]
+    result = read_workbook(args.xlsx)
+    out_prefix = str(Path(args.xlsx).with_suffix(""))
+    for path in plot_all(result, out_prefix, args.plot_axis, args.plot_memkm_steps):
+        print(f"wrote {path}")
 
-    # Drop only rows whose kMC coverages are missing; ME-MKM columns (added by
-    # the coexistence phase) may legitimately be NaN at some betas. A sweep run
-    # with --no-kmc has no complete kMC rows -- keep the frame so the
-    # mean-field branches still plot.
-    kmc_cols = ["e_empty", "co_empty", "o_empty", "e_full", "co_full", "o_full"]
-    raw = pd.read_csv(args.csv)
-    sweep = raw.dropna(subset=kmc_cols)
-    if sweep.empty:
-        sweep = raw
-    stem = p.stem.replace("_kmc_sweep", "")
-
-    # use the delta the sweep recorded, so the branches match its kMC points
-    delta_scale = (float(sweep["delta_scale"].iloc[0])
-                   if "delta_scale" in sweep.columns else DELTA_SCALE)
-
-    # Prefer the branches written by the sweep's mean-field phase; only
-    # recompute (on the fly, at the sweep's delta) if that file is absent.
-    mf_path = dir / f"{stem}_meanfield.csv"
-    if mf_path.exists():
-        branches = pd.read_csv(mf_path)
-        print(f"read mean-field branches from {mf_path.name}")
-    else:
-        betas_fine = build_meanfield_betas(sweep["beta"].to_numpy(),
-                                           args.meanfield_beta_step)
-        branches = run_meanfield(betas_fine, delta_scale=delta_scale)
-
-    for path in plot_sweep(sweep, f"{dir}/{stem}", branches=branches,
-                           delta_scale=delta_scale,
-                           rates_beta=args.rates_beta,
-                           rates_theta_o=args.rates_theta_o):
-        print(f"wrote {Path(path).name}  (delta = {delta_scale:g} * beta)")
 
 if __name__ == "__main__":
     main()

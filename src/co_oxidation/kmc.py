@@ -4,11 +4,11 @@ square lattice, after Tian & Rangarajan (J. Phys. Chem. C 2021, 125, 20275).
 
 Model (site states: 0 = empty, 1 = CO*, 2 = O*):
 
-    CO(g) + *      -> CO*            rate  alpha
-    CO*            -> CO(g) + *      rate  gamma * exp(+n*eps/RT)
-    O2(g) + 2*     -> O* + O*        rate  beta          (adjacent empty pair)
-    O* + O*        -> O2(g) + 2*     rate  delta         
-    CO* + O*       -> CO2(g) + 2*    rate  kr * exp(+n*eps/RT)
+    CO(g) + *      -> CO*            rate  k_co_ads
+    CO*            -> CO(g) + *      rate  k_co_des * exp(+n*eps/RT)
+    O2(g) + 2*     -> O* + O*        rate  k_o_ads          (adjacent empty pair)
+    O* + O*        -> O2(g) + 2*     rate  k_o_des         
+    CO* + O*       -> CO2(g) + 2*    rate  k_rxn * exp(+n*eps/RT)
     CO* + *        -> * + CO*        rate  khop * exp(-dn*eps/2RT)   (NN hop)
     O*  + *        -> * + O*         rate  khop
 
@@ -68,16 +68,16 @@ J_MAX = 12  # event slots per site
 # one neighbour of the CO is its O partner. Slots 0..4 are allocated anyway
 # to keep the indexing uniform.
 K_CLASSES = 21
-CLASS_CO_ADS = 0        # rate alpha, the same on every empty site
-CLASS_CO_DES0 = 1       # 1..5:   gamma * exp(n*eps/RT), repulsion boosts desorption
-CLASS_O2_ADS = 6        # rate beta, per adjacent empty pair
-CLASS_RXN0 = 7          # 7..11:  kr * exp(n*eps/RT), repulsion boosts reaction
+CLASS_CO_ADS = 0        # rate k_co_ads, the same on every empty site
+CLASS_CO_DES0 = 1       # 1..5:   k_co_des * exp(n*eps/RT), repulsion boosts desorption
+CLASS_O2_ADS = 6        # rate k_o_ads, per adjacent empty pair
+CLASS_RXN0 = 7          # 7..11:  k_rxn * exp(n*eps/RT), repulsion boosts reaction
 CLASS_CO_HOP0 = 12      # 12..18: khop * exp(-dn*eps/2RT), hopping into crowding is slow
 CLASS_O_HOP = 19        # rate khop, O* feels no lateral interaction
-CLASS_O2_DES = 20       # rate delta, flat like O2 ads and O hop (no O-O interaction term)
+CLASS_O2_DES = 20       # rate k_o_des, flat like O2 ads and O hop (no O-O interaction term)
 
 
-def make_class_rates(alpha, gamma, beta, kr, khop, delta=0.0, eps=8368.0, T=500.0):
+def make_class_rates(k_co_ads, k_co_des, k_o_ads, k_rxn, khop, k_o_des=0.0, eps=8368.0, T=500.0):
     """Rate of each of the 21 n-fold classes.
 
     This is the only place where rates are computed. The simulation itself
@@ -85,16 +85,16 @@ def make_class_rates(alpha, gamma, beta, kr, khop, delta=0.0, eps=8368.0, T=500.
     """
     eps_rt = eps / (R_GAS * T)  # dimensionless repulsion energy per CO-CO pair
     rates = np.zeros(K_CLASSES)
-    rates[CLASS_CO_ADS] = alpha
+    rates[CLASS_CO_ADS] = k_co_ads
     for n in range(5):
-        rates[CLASS_CO_DES0 + n] = gamma * np.exp(n * eps_rt)
-        rates[CLASS_RXN0 + n] = kr * np.exp(n * eps_rt)
-    rates[CLASS_O2_ADS] = beta
+        rates[CLASS_CO_DES0 + n] = k_co_des * np.exp(n * eps_rt)
+        rates[CLASS_RXN0 + n] = k_rxn * np.exp(n * eps_rt)
+    rates[CLASS_O2_ADS] = k_o_ads
     for dn in range(-3, 4):
         # BEP with omega = 1/2, only half the energy change enters the barrier
         rates[CLASS_CO_HOP0 + dn + 3] = khop * np.exp(-dn * eps_rt / 2.0)
     rates[CLASS_O_HOP] = khop
-    rates[CLASS_O2_DES] = delta
+    rates[CLASS_O2_DES] = k_o_des
     return rates
 
 
@@ -456,13 +456,13 @@ def _run(lat, L, class_rate, t_max, max_steps, sample_interval, t_equil, seed):
 @dataclass
 class KMCParams:
     L: int = 16                     # lattice edge, N = L*L sites
-    alpha: float = 1.6              # CO adsorption rate, s^-1
-    gamma: float = 1e-3             # CO desorption prefactor, s^-1
-    kr: float = 1.0                 # CO+O reaction prefactor, s^-1
-    delta: float = 0.0              # O2 desorption rate, s^-1; 0 keeps O2 ads irreversible
+    k_co_ads: float = 1.6              # CO adsorption rate, s^-1
+    k_co_des: float = 1e-3             # CO desorption prefactor, s^-1
+    k_rxn: float = 1.0                 # CO+O reaction prefactor, s^-1
+    k_o_des: float = 0.0              # O2 desorption rate, s^-1; 0 keeps O2 ads irreversible
     eps: float = 8368.0             # CO-CO NN repulsion, J/mol
     T: float = 500.0                # temperature, K
-    khop: float | None = None       # hop rate, defaults to khop_scale*max(beta, alpha)
+    khop: float | None = None       # hop rate, defaults to khop_scale*max(k_o_ads, k_co_ads)
     khop_scale: float = 1000.0      # fast-diffusion factor, the paper asks for 3+ orders
     t_max: float = 30.0             # kMC time limit, s
     max_steps: int = 1_000_000_000  # event limit, whichever of the two hits first
@@ -473,7 +473,7 @@ class KMCParams:
 
 @dataclass
 class KMCResult:
-    beta: float
+    k_o_ads: float
     times: np.ndarray
     cov_empty: np.ndarray
     cov_co: np.ndarray
@@ -506,8 +506,8 @@ def make_lattice(L, init="empty", theta_co=0.0, theta_o=0.0, rng=None):
     raise ValueError(f"unknown init {init!r}")
 
 
-def run_kmc(beta, init="empty", params=None, lat0=None, **overrides):
-    """Run one kMC trajectory at O2 impingement rate beta.
+def run_kmc(k_o_ads, init="empty", params=None, lat0=None, **overrides):
+    """Run one kMC trajectory at O2 impingement rate k_o_ads.
 
     Stops at t >= t_max or after max_steps events, whichever comes first.
     Steady-state coverages are time-weighted averages over t >= t_equil.
@@ -515,16 +515,130 @@ def run_kmc(beta, init="empty", params=None, lat0=None, **overrides):
     params = replace(params or KMCParams(), **overrides)
     lat = lat0.copy() if lat0 is not None else make_lattice(params.L, init)
     khop = (params.khop if params.khop is not None
-            else params.khop_scale * max(beta, params.alpha))
-    class_rate = make_class_rates(params.alpha, params.gamma, beta, params.kr,
-                                  khop, params.delta, params.eps, params.T)
+            else params.khop_scale * max(k_o_ads, params.k_co_ads))
+    class_rate = make_class_rates(params.k_co_ads, params.k_co_des, k_o_ads, params.k_rxn,
+                                  khop, params.k_o_des, params.eps, params.T)
     t_equil = params.t_equil if params.t_equil is not None else 0.5 * params.t_max
     (times, cov_empty, cov_co, cov_o, t_final, steps,
      avg_empty, avg_co, avg_o, stuck) = _run(lat, params.L, class_rate,
                                              params.t_max, params.max_steps,
                                              params.sample_interval, t_equil,
                                              params.seed)
-    return KMCResult(beta=beta, times=times, cov_empty=cov_empty, cov_co=cov_co,
+    return KMCResult(k_o_ads=k_o_ads, times=times, cov_empty=cov_empty, cov_co=cov_co,
                      cov_o=cov_o, steady_empty=avg_empty, steady_co=avg_co,
                      steady_o=avg_o, t_final=t_final, steps=steps,
                      stuck=bool(stuck), lattice=lat)
+
+
+# first-passage runs
+# The same n-fold machinery as _run, stopped the first time a caller-supplied
+# predicate on the particle counts turns true. That is what a mean-first-passage
+# time needs: the *hitting* time of a set of configurations, not a time average
+# over a fixed window. The predicate is an njit function passed straight into the
+# compiled loop, so a user-written stopping condition costs a call per event and
+# nothing else. Passing a function argument defeats numba's on-disk cache, hence
+# cache=False here (the loop body itself is the cached functions above).
+
+@njit(cache=False)
+def _run_first_passage(lat, L, class_rate, predicate, t_max, max_steps, seed):
+    """Run until predicate(n_empty, n_co, n_o, N) is true, or until the time/step
+    limit. Returns (t_hit, hit, t_final, steps, stuck); t_hit is NaN when the run
+    ended without ever satisfying the predicate."""
+    if seed >= 0:
+        np.random.seed(seed)
+    N = L * L
+    event_class, event_pos, class_members, class_count = _init_tables(lat, L)
+    n_co = 0
+    n_o = 0
+    for i in range(N):
+        if lat[i] == CO:
+            n_co += 1
+        elif lat[i] == O:
+            n_o += 1
+    affected = np.empty(26, np.int64)
+    t = 0.0
+    steps = 0
+    # a starting configuration already in the target set has passage time zero;
+    # testing before the loop keeps that case from being reported as a miss
+    if predicate(N - n_co - n_o, n_co, n_o, N):
+        return 0.0, True, 0.0, 0, False
+    while t < t_max and steps < max_steps:
+        total = _total_rate(class_count, class_rate)
+        if total <= 0.0:
+            return np.nan, False, t, steps, True
+        event = _select(class_rate, class_members, class_count, total)
+        if event < 0:
+            return np.nan, False, t, steps, True
+        dt = -np.log(1.0 - np.random.rand()) / total
+        d_co, d_o = _apply(lat, event, L, event_class, event_pos, class_members,
+                           class_count, affected)
+        n_co += d_co
+        n_o += d_o
+        t += dt
+        steps += 1
+        if predicate(N - n_co - n_o, n_co, n_o, N):
+            return t, True, t, steps, False
+    return np.nan, False, t, steps, False
+
+
+@dataclass
+class FirstPassageResult:
+    k_o_ads: float
+    t_hit: float            # first time the predicate held, NaN if it never did
+    hit: bool               # False means the sample is right-censored at t_final
+    t_final: float
+    steps: int
+    stuck: bool             # the lattice ran out of possible events (O-poisoned)
+    lattice: np.ndarray
+
+
+def coverage_predicate(species="co", threshold=0.5, above=True):
+    """An njit stopping predicate on one species' fractional coverage.
+
+    `above=True` stops the first time theta_species >= threshold, `above=False` the
+    first time it drops to <= threshold. This is the predicate factory to reach for
+    first; write your own njit (n_empty, n_co, n_o, N) -> bool for anything else."""
+    codes = {"empty": 0, "co": 1, "o": 2}
+    if species not in codes:
+        raise ValueError(f"unknown species {species!r}, choose from {sorted(codes)}")
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"threshold is a coverage fraction in [0, 1], got {threshold}")
+    code = codes[species]     # closed over as a compile-time constant by numba
+    hi = bool(above)
+
+    @njit(cache=False)
+    def predicate(n_empty, n_co, n_o, N):
+        if code == 0:
+            n = n_empty
+        elif code == 1:
+            n = n_co
+        else:
+            n = n_o
+        if hi:
+            return n >= threshold * N
+        return n <= threshold * N
+
+    return predicate
+
+
+def run_first_passage(k_o_ads, predicate, init="empty", params=None, lat0=None,
+                      **overrides):
+    """Run one kMC trajectory until `predicate` first holds, and report when.
+
+    `predicate` is an njit function (n_empty, n_co, n_o, N) -> bool; build a common one
+    with coverage_predicate(). Parameters are the same KMCParams as run_kmc, and
+    params.t_max / params.max_steps still bound the run: a trajectory that reaches
+    either without hitting comes back with hit=False and t_hit=NaN, i.e. censored at
+    t_final rather than silently reported as a passage time."""
+    params = replace(params or KMCParams(), **overrides)
+    lat = lat0.copy() if lat0 is not None else make_lattice(params.L, init)
+    khop = (params.khop if params.khop is not None
+            else params.khop_scale * max(k_o_ads, params.k_co_ads))
+    class_rate = make_class_rates(params.k_co_ads, params.k_co_des, k_o_ads, params.k_rxn,
+                                  khop, params.k_o_des, params.eps, params.T)
+    t_hit, hit, t_final, steps, stuck = _run_first_passage(
+        lat, params.L, class_rate, predicate, params.t_max, params.max_steps,
+        params.seed)
+    return FirstPassageResult(k_o_ads=k_o_ads, t_hit=float(t_hit), hit=bool(hit),
+                              t_final=float(t_final), steps=int(steps),
+                              stuck=bool(stuck), lattice=lat)

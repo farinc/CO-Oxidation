@@ -1,0 +1,31 @@
+% For black text do:
+%     pdflatex mechanism.tex
+% For white text do:
+%     pdflatex -jobname=mechanism_white "\def\whitetext{1}\input{mechanism.tex}"
+\documentclass[preview,border=2pt]{standalone}
+\usepackage{mathtools}
+\usepackage{xcolor}
+ 
+\makeatletter
+% Full-arrowhead analogue of mathtools' \xrightleftharpoons,
+% built from amsmath's own \rightarrowfill@ / \leftarrowfill@.
+\providecommand*\xrightleftarrows[2][]{\mathrel{%
+  \raise.50ex\hbox{%
+    $\ext@arrow 0359\rightarrowfill@{\phantom{#1}}{#2}$}%
+  \setbox0=\hbox{%
+    $\ext@arrow 3095\leftarrowfill@{#1}{\phantom{#2}}$}%
+  \kern-\wd0 \lower.50ex\box0}}
+\makeatother
+ 
+\providecommand\whitetext{0}
+ 
+\begin{document}
+\ifnum\whitetext=1 \color{white}\else\color{black}\fi
+\[\begin{aligned}
+    \mathrm{CO(g)} + \ast &\xrightleftarrows[k_\mathrm{CO,ads}]{k_\mathrm{CO,des}} \mathrm{CO}^\ast \\
+    \mathrm{O_2(g)} + \ast + \ast &\xrightleftarrows[k_\mathrm{O,ads}]{k_\mathrm{O,des}} \mathrm{O}^\ast + \mathrm{O}^\ast \\
+    \mathrm{CO}^\ast + \mathrm{O}^\ast &\xrightarrow{k_\mathrm{rxn}} \mathrm{CO_2(g)} + \ast + \ast \\
+    \mathrm{CO}^\ast + \ast &\xleftrightharpoons[]{k_\mathrm{hop}} \ast + \mathrm{CO}^\ast \\
+    \mathrm{O}^\ast + \ast &\xleftrightharpoons[]{k_\mathrm{hop}} \ast + \mathrm{O}^\ast \\
+\end{aligned}\]
+\end{document}

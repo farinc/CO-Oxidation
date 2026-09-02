@@ -2,26 +2,26 @@ import subprocess as sp
 from pathlib import Path
 
 L = [8, 10, 12]
-Delta_scale = [1, 0.1, 0.01, 0.001, 0.0001, 0.00001]
 out_dir = Path('output/')
 
-for l in L:
-    for i,delta_scale in enumerate(Delta_scale):
-        prefix_job_name = f"tile_{l}_delta{i}"
-        command = [
-            "qsub",
-            "-N", prefix_job_name,
-            "-pe", "orte", "24",
-            "submit_sweep_job.sh",
-            "--out", out_dir.joinpath(prefix_job_name),
-            "--memkm-sites", f"{l}",
-            "--delta-scale", f"{delta_scale}",
-        ]
+n_cores = 2 * len(L)
 
-        result = sp.run(
-            command,
-            check=True,
-            text=True,
-            capture_output=False,
-        )
+job_name = "tile_delta_set"
+command = [
+    "qsub",
+    "-N", job_name,
+    "-pe", "orte", str(n_cores),
+    "submit_sweep_job.sh",
+    "--out", str(out_dir / job_name),
+    "--sweep", "k_o_ads=0:10:0.5",
+    "--sweep", "memkm_sites=" + ",".join(str(l) for l in L),
+    "--coexistence",
+    "--coexistence-axis", "k_o_ads",
+]
 
+sp.run(
+    command,
+    check=True,
+    text=True,
+    capture_output=False,
+)

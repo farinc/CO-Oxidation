@@ -8,8 +8,10 @@ dependencies = [
     "me-mkm",
     "numba>=0.66.0",
     "numpy>=2.4.6",
+    "openpyxl>=3.1",
     "pandas>=3.0.3",
     "scipy>=1.18.0",
+    "typer>=0.27.1",
 ]
 
 [project.optional-dependencies]

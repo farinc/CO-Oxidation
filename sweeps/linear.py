@@ -1,91 +1,102 @@
 """
-Serial beta sweep: runs the kMC cases, the mean-field branches, and (opt-in)
-the ME-MKM / SLEPc coexistence analysis on a single core, writing
-{out}_kmc_sweep.csv (kMC coverages, plus the ME-MKM columns if --memkm is on),
-{out}_coexistence.csv (only with --memkm: transition rates at each beta*) and
-{out}_meanfield.csv (the MF-MK / Ea-MK branches). Each phase can be toggled
-independently with --no-kmc / --memkm / --no-meanfield.
+Serial sweep: runs the kMC, mean-field (MF-MKM/Bragg-Williams) and (opt-in) ME-MKM
+phases over an N-D parameter grid on a single core, writing one {out}.xlsx workbook
+(Parameters/Axes/Grid meta sheets, then per-step sheets, then a Coexistence sheet and
+per-crossing ME-MKM sheets if --coexistence ran) plus the kept figures if --plot.
 
 The ME-MKM phase is off by default here: even a small tile is too slow for a
-laptop-run sweep. sweeps/mpi.py enables it by default since that's meant to run on a cluster.
+laptop-run sweep. sweeps/mpi.py enables it by default since that's meant to run on a
+cluster.
 
 Usage:
     uv run python -m sweeps.linear
     uv run python -m sweeps.linear --kmc-L 24 --out case1
-    uv run python -m sweeps.linear --memkm --memkm-sites 8     # + ME-MKM/SLEPc
-    uv run python -m sweeps.linear --no-kmc --memkm            # ME-MKM only
+    uv run python -m sweeps.linear --sweep k_o_ads=0:10:0.4 --kmc-n-trajectories 3
+    uv run python -m sweeps.linear --memkm --memkm-sites 8 --sweep k_o_ads=0:10:0.4 \\
+        --coexistence --coexistence-axis k_o_ads   # + ME-MKM/SLEPc coexistence
 """
 
-from sweeps._common import (
-    assemble,
-    build_argparser,
-    build_betas,
-    build_meanfield_betas,
-    build_tasks,
-    build_tile,
-    delta_scale_of,
-    maybe_plot_coexistence,
-    maybe_plot_sweep,
-    meanfield_physics_from_args,
-    params_from_args,
-    run_coexistence,
-    run_meanfield,
-    run_task,
-    save_coexistence_csv,
-    save_meanfield_csv,
-    save_sweep_csv,
-)
-
-
-def run_sweep(betas, params, seed, delta_scale=0.0):
-    """Run every (beta, init) task serially. Returns the {out}_kmc_sweep.csv dict."""
-    tasks = build_tasks(betas, seed)
-    results = [run_task(task, params, delta_scale=delta_scale)
-              for task in tasks]
-    return assemble(betas, results)
+from sweeps.cli import parse_args
+from sweeps.coexistence_driver import run_coexistence_for_grid, validate_bisection_axis
+from sweeps.excel import write_workbook
+from sweeps.axes import SweepGrid
+from sweeps.observables import run_kmc_observables, run_memkm_observables
+from sweeps.results import StepResult, SweepResult
+from sweeps.steps import (build_tile, kmc_seeds_for_step, run_kmc_for_step,
+                          run_meanfield_for_step, run_memkm_for_step, save_graph_html)
 
 
 def main():
-    ap = build_argparser(__doc__.splitlines()[1], memkm_default=False)
-    args, _ = ap.parse_known_args()          # let any PETSc/SLEPc options pass
+    args = parse_args(None, memkm_default=False)
+    grid = SweepGrid.build(args.base, args.axes)
 
-    params = params_from_args(args)
-    betas = build_betas(args.beta_min, args.beta_max, args.beta_step)
-    dscale = delta_scale_of(args)
+    if args.memkm and args.coexistence:
+        validate_bisection_axis(grid, args.coexistence_axis, True, args.coexistence_fixed)
 
-    # Phase A: kMC.
-    if args.no_kmc:
-        sweep = assemble(betas, [])          # all-NaN kMC columns
-    else:
-        sweep = run_sweep(betas, params, args.kmc_seed, delta_scale=dscale)
+    tile_cache: dict[int, object] = {}
 
-    # Phase B: ME-MKM / SLEPc coexistence (off by default, see --memkm).
-    if args.memkm:
-        tile = build_tile(args)
-        print("ME-MKM / SLEPc coexistence phase")
-        cols, rows, arrays = run_coexistence(betas, tile, args, comm=None)
-        sweep.update(cols)
-        coex_path = args.memkm_coexistence_out or f"{args.out}_coexistence.csv"
-        if save_coexistence_csv(rows, coex_path):
-            print(f"Coexistence data written to '{coex_path}'.")
-        if args.plot:
-            maybe_plot_coexistence(cols, rows, arrays, betas, args.out)
+    def tile_for(sites):
+        if sites not in tile_cache:
+            tile_cache[sites] = build_tile(sites)
+        return tile_cache[sites]
 
-    save_sweep_csv(betas, sweep, args.kmc_L, f"{args.out}_kmc_sweep.csv",
-                   delta_scale=dscale)
-    print(f"Data written to '{args.out}_kmc_sweep.csv'.")
+    if args.memkm and args.save_graph:
+        save_graph_html(tile_for(args.base.memkm_sites), args.base, args.out)
 
-    # Phase C: mean-field branches on a filled-in grid through the sweep betas.
-    branches = None
-    if not args.no_meanfield:
-        betas_fine = build_meanfield_betas(betas, args.meanfield_beta_step)
-        branches = run_meanfield(betas_fine, delta_scale=dscale,
-                                 **meanfield_physics_from_args(args))
-        save_meanfield_csv(branches, f"{args.out}_meanfield.csv")
-        print(f"Mean-field branches written to '{args.out}_meanfield.csv'.")
+    # Per-microstate coverage arrays depend only on the tile, not the physics -- scope
+    # the cache per tile (memkm_sites) so steps at different site counts never share it.
+    coverage_caches: dict[int, dict] = {}
+
+    def coverage_cache_for(sites):
+        return coverage_caches.setdefault(sites, {})
+
+    steps = []
+    for grid_step in grid.steps:
+        cfg = grid_step.config
+        kmc = (run_kmc_for_step(cfg, kmc_seeds_for_step(cfg.kmc_seed, grid_step.index,
+                                                        cfg.kmc_n_trajectories))
+               if args.kmc else None)
+        meanfield = run_meanfield_for_step(cfg, kmc) if args.meanfield else None
+        memkm = memkm_state = None
+        if args.memkm:
+            memkm, memkm_state = run_memkm_for_step(
+                cfg, tile_for(cfg.memkm_sites), n_eigs_scan=args.memkm_n_eigs_scan,
+                factor=args.memkm_factor_solver, order_species=args.memkm_order_species,
+                solve_left=not args.memkm_skip_left_modes, comm=None,
+                coverage_cache=coverage_cache_for(cfg.memkm_sites))
+        # Observables run last: both families see everything this step already
+        # produced, and neither triggers a solve of its own.
+        observables = {}
+        if args.observables:
+            observables.update(run_kmc_observables(
+                args.observables, cfg, kmc, grid_step.index, args.observable_options))
+            observables.update(run_memkm_observables(
+                args.observables, memkm_state, comm=None,
+                factor=args.memkm_factor_solver, options=args.observable_options,
+                step_index=grid_step.index))
+        steps.append(StepResult(step=grid_step, kmc=kmc, meanfield=meanfield,
+                                memkm=memkm, observables=observables))
+        print(f"step {grid_step.index}: {grid_step.axis_values or '(no swept axes)'}",
+              flush=True)
+
+    coexistence = None
+    if args.memkm and args.coexistence:
+        coexistence = run_coexistence_for_grid(
+            grid, args.coexistence_axis, comm=None, n_eigs_scan=args.memkm_n_eigs_scan,
+            boundary_eps=args.memkm_boundary_eps, n_eigs=args.memkm_n_eigs,
+            xtol=args.memkm_brent_xtol, factor=args.memkm_factor_solver,
+            order_species=args.memkm_order_species, fixed_value=args.coexistence_fixed)
+
+    result = SweepResult(grid=grid, steps=steps, coexistence=coexistence)
+
+    out_path = f"{args.out}.xlsx"
+    write_workbook(result, out_path)
+    print(f"Data written to '{out_path}'.")
 
     if args.plot:
-        maybe_plot_sweep(sweep, betas, args, dscale, branches)
+        from sweeps.plotting import plot_all
+        for path in plot_all(result, args.out, args.plot_axis, args.plot_memkm_steps):
+            print(f"  [plot] wrote {path}")
 
 
 if __name__ == "__main__":
