@@ -15,11 +15,11 @@ different things (see .context):
 
   family="kmc"    ctx is a KMCContext: the trajectories already run at this parameter
                   point, plus ctx.run(...)/ctx.run_first_passage(...) to launch more.
-  family="memkm"  ctx is a MemkmContext: the solved ME-MKM state -- stationary
-                  distribution, slow eigenpairs, spectral basin masks -- plus ctx.W,
+  family="memkm"  ctx is a MemkmContext: the solved ME-MKM state, stationary
+                  distribution, slow eigenpairs, spectral basin masks, plus ctx.W,
                   the generator itself, for anything that needs a linear solve.
 
-The return value is a mapping {key: scalar-or-array}; a bare scalar/array is also
+The return value is a mapping {key: scalar-or-array}. A bare scalar/array is also
 accepted and takes the observable's own name. Keys are namespaced as "{name}.{key}" in
 the sweep output, so two observables can both return "tau" without colliding.
 
@@ -74,7 +74,7 @@ _REGISTRY: dict[str, Observable] = {}
 
 def register(name: str, family: str, fn: Callable[[Any], Any],
              doc: str | None = None, replace: bool = False) -> Observable:
-    """Register `fn` under `name`. Prefer the @observable decorator; this is the
+    """Register `fn` under `name`. Prefer the @observable decorator. This is the
     functional form, for registering something you did not write."""
     if family not in FAMILIES:
         raise ValueError(f"observable {name!r}: family must be one of {FAMILIES}, "
@@ -120,7 +120,7 @@ def available(family: str | None = None) -> list[Observable]:
 
 def resolve(names: Iterable[str], family: str | None = None) -> list[Observable]:
     """Look up `names`, keeping the caller's order. With `family` given, names from
-    other families are dropped -- that is how one --observable list is fed to both the
+    other families are dropped, that is how one --observable list is fed to both the
     kMC and the ME-MKM phase of a sweep without the caller sorting them by hand."""
     out = []
     for n in names:

@@ -36,7 +36,6 @@ class ParsedArgs:
     memkm_n_eigs: int
     memkm_brent_xtol: float
     memkm_factor_solver: str | None
-    memkm_skip_left_modes: bool
     plot_axis: str | None
     plot_memkm_steps: str | None
     observables: list[str]
@@ -248,12 +247,6 @@ def build_app(memkm_default: bool, results: list[ParsedArgs]) -> typer.Typer:
             help="Which PETSc LU solver to use instead of the default. Choose "
                  "one of mumps, superlu_dist, pastix, or petsc.",
             rich_help_panel="ME-MKM"),
-        memkm_skip_left_modes: bool = typer.Option(
-            False, "--memkm-skip-left-modes",
-            help="Skip solving the left eigenvector at every step. That solve is "
-                 "usually the most expensive part of a large grid run, so this "
-                 "speeds things up a lot, but psi_L_2 is then exported as NaN.",
-            rich_help_panel="ME-MKM"),
 
         coexistence: bool = typer.Option(
             False, "--coexistence/--no-coexistence",
@@ -282,7 +275,7 @@ def build_app(memkm_default: bool, results: list[ParsedArgs]) -> typer.Typer:
                 f"unrecognized option(s): {' '.join(unrecognized)}", ctx=ctx)
 
         # --observable accepts both "--observable a --observable b" and
-        # "--observable a,b"; flatten the two forms into one list of names.
+        # "--observable a,b". Flatten the two forms into one list of names.
         observable_names = [n.strip() for spec in observable
                             for n in spec.split(",") if n.strip()]
         if list_observables:
@@ -320,7 +313,7 @@ def build_app(memkm_default: bool, results: list[ParsedArgs]) -> typer.Typer:
             memkm_n_eigs_scan=memkm_n_eigs_scan, memkm_boundary_eps=memkm_boundary_eps,
             memkm_n_eigs=memkm_n_eigs, memkm_brent_xtol=memkm_brent_xtol,
             memkm_factor_solver=memkm_factor_solver,
-            memkm_skip_left_modes=memkm_skip_left_modes, plot_axis=plot_axis,
+            plot_axis=plot_axis,
             plot_memkm_steps=plot_memkm_steps, observables=observable_names,
             observable_options=observable_opts,
             observable_modules=list(observable_module)))
@@ -330,7 +323,7 @@ def build_app(memkm_default: bool, results: list[ParsedArgs]) -> typer.Typer:
 
 def parse_args(argv: list[str] | None, memkm_default: bool) -> ParsedArgs:
     """Parse argv into a ParsedArgs, or exit the process (--help, --version, or a usage
-    error) exactly as a standalone typer/click CLI would -- printing the formatted
+    error) exactly as a standalone typer/click CLI would, printing the formatted
     help/error to the right stream and using the matching exit code.
 
     We can't just call `command.main(standalone_mode=False)` and use its return value:

@@ -43,7 +43,7 @@ def main():
     if args.memkm and args.save_graph:
         save_graph_html(tile_for(args.base.memkm_sites), args.base, args.out)
 
-    # Per-microstate coverage arrays depend only on the tile, not the physics -- scope
+    # Per-microstate coverage arrays depend only on the tile, not the physics, scope
     # the cache per tile (memkm_sites) so steps at different site counts never share it.
     coverage_caches: dict[int, dict] = {}
 
@@ -62,7 +62,7 @@ def main():
             memkm, memkm_state = run_memkm_for_step(
                 cfg, tile_for(cfg.memkm_sites), n_eigs_scan=args.memkm_n_eigs_scan,
                 factor=args.memkm_factor_solver, order_species=args.memkm_order_species,
-                solve_left=not args.memkm_skip_left_modes, comm=None,
+                comm=None,
                 coverage_cache=coverage_cache_for(cfg.memkm_sites))
         # Observables run last: both families see everything this step already
         # produced, and neither triggers a solve of its own.

@@ -2,7 +2,7 @@
 
 Any RunConfig field can be designated a swept axis via AxisSpec.parse (the CLI's
 repeatable --sweep NAME=SPEC flag, sweeps/cli.py). SweepGrid.build takes the Cartesian
-product of every designated axis; each grid point is a GridStep with a fully-resolved
+product of every designated axis. Each grid point is a GridStep with a fully-resolved
 RunConfig."""
 
 from dataclasses import dataclass, fields, replace

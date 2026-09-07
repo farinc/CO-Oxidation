@@ -1,12 +1,12 @@
 """Two reference observables, one per family, kept deliberately small.
 
-They exist to pin the plumbing down with something real -- and to be the thing you copy
+They exist to pin the plumbing down with something real, and to be the thing you copy
 when writing your own. Between them they show both shapes an observable takes: reading
 what the sweep already computed (kmc_branching) and reweighting a solved distribution
 (coverage_moments). Neither needs an extra solve, so both are free to leave on.
 
 An observable that must *drive* the simulation instead of reading it goes through
-ctx.run() / ctx.run_first_passage() -- see KMCContext.
+ctx.run() / ctx.run_first_passage(), see KMCContext.
 """
 
 import numpy as np
@@ -20,7 +20,7 @@ def kmc_branching(ctx):
 
     Purely post-hoc: it reads the trajectories the sweep already ran (ctx.results) and
     costs nothing. Near a bistable point the two initial conditions land on different
-    branches, so frac_co_rich sits strictly between 0 and 1 and steady_co_std is large;
+    branches, so frac_co_rich sits strictly between 0 and 1 and steady_co_std is large,
     on a monostable point every trajectory agrees.
     """
     results = list(ctx.results)
@@ -43,7 +43,7 @@ def kmc_branching(ctx):
 def coverage_moments(ctx):
     """Fluctuations of the adsorbate counts under the ME-MKM stationary distribution.
 
-    Pure numpy over theta and the per-microstate coverages -- no second solve, so this
+    Pure numpy over theta and the per-microstate coverages, no second solve, so this
     is what a cheap ME-MKM observable looks like. The variances are the coverage
     susceptibilities and peak where the distribution goes bimodal, which makes them an
     independent read on the same transition the spectral basins are tracking.

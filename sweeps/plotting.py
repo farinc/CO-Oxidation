@@ -74,7 +74,7 @@ def _diverging_norm(grid, center=0.0):
 def plot_coverage_map(memkm: MemkmStepResult, out_path_prefix: str) -> list[str]:
     """Coverage-class maps over (N_CO, N_O): population, the slow right mode sum
     (psi_R_2, whose sign is the macrostate partition), and the slow left mode class
-    mean (psi_L_2, the reaction coordinate -- skipped if not solved)."""
+    mean (psi_L_2, the reaction coordinate, skipped if not solved)."""
     l = memkm.n_sites
     a = np.arange(l + 1)
     outside = (a[:, None] + a[None, :]) > l
@@ -126,7 +126,7 @@ def plot_eigenspectrum(arrays: dict, out_path: str) -> str | None:
     left eigenvectors in the left column and right eigenvectors in the right column,
     each basin drawn as its own segment split at the A/B boundary.
 
-    Needs the raw per-microstate arrays from CoexistencePipeline.report() -- present
+    Needs the raw per-microstate arrays from CoexistencePipeline.report(), present
     when plotting chains directly off a live SweepResult, but not reconstructable from
     a saved .xlsx (sweeps.excel only carries the adsorbate-count joint distributions,
     not the per-microstate vectors), in which case this prints a note and returns None.
@@ -328,7 +328,7 @@ def plot_bifurcation(steps: list[StepResult], plot_axis: str, out_path: str,
 # --- orchestration + N-D faceting ------------------------------------------------------
 
 def group_steps(steps: list[StepResult], plot_axis: str) -> list[tuple[dict, list[StepResult]]]:
-    """Group `steps` by the value-tuple of every swept axis EXCEPT plot_axis; one
+    """Group `steps` by the value-tuple of every swept axis EXCEPT plot_axis. One
     group == one facet/figure. A grid with plot_axis as the only swept axis yields
     exactly one group."""
     other_names = sorted({n for s in steps for n in s.step.axis_values if n != plot_axis})
@@ -357,11 +357,11 @@ def plot_all(result: SweepResult, out_prefix: str, plot_axis: str | None = None,
             plot_memkm_steps: str | None = None) -> list[str]:
     """Concrete N-D faceting rule:
       - plot_axis resolves (see _resolve_plot_axis) to the coexistence bisection axis
-        if coexistence ran, else the explicit argument, else the sole swept axis; with
+        if coexistence ran, else the explicit argument, else the sole swept axis. With
         more than one swept axis and no coexistence, an explicit plot_axis is required.
-      - bifurcation: one figure per group from group_steps(); "{out}_bifurcation.png"
+      - bifurcation: one figure per group from group_steps(), "{out}_bifurcation.png"
         if there's exactly one group, else "_g{i}.png" (the fixed axis=value context
-        for that group is printed and put in the figure title; still traceable via
+        for that group is printed and put in the figure title. Still traceable via
         the workbook's Grid sheet by step index).
       - ratio-curve: one figure per CoexistenceCrossing (each already is one
         outer-axis slice), only produced when coexistence ran.

@@ -2,8 +2,8 @@
 Mean-field microkinetic models for the CO oxidation system of
 Tian & Rangarajan (J. Phys. Chem. C 2021, 125, 20275), square lattice Z = 4.
 
-    dx/dt = r_ads_co - r_des_co - r_oxi         (x = theta_CO)
-    dy/dt = r_ads_o - r_oxi - r_des_o           (y = theta_O, w = 1 - x - y)
+    dx/dt = r_ads_co, r_des_co, r_oxi         (x = theta_CO)
+    dy/dt = r_ads_o, r_oxi, r_des_o           (y = theta_O, w = 1 - x, y)
 
 O2 desorption (O* + O* -> O2(g) + 2*, rate k_o_des) mirrors O2 adsorption's
 mean-field form, r_des_o = Z*k_o_des*y^2, the mass-action rate of a site
@@ -24,8 +24,8 @@ Two rate laws are implemented (the model argument):
           form, its barrier does not involve CO.
 
 Steady states of the plain model are found exactly. Subtracting the two
-equations gives x = (k_co_ads*w - Z*k_o_ads*w^2)/k_co_des, and substituting into
-k_rxn*x*y = k_o_ads*w^2 with y = 1 - w - x reduces the system to a single quartic
+equations gives x = (k_co_ads*w, Z*k_o_ads*w^2)/k_co_des, and substituting into
+k_rxn*x*y = k_o_ads*w^2 with y = 1 - w, x reduces the system to a single quartic
 in w. np.roots then delivers every root at once, stable and unstable
 branches alike. The Ea model is transcendental, so its steady states come
 from Newton iterations started on a grid of coverages instead. In both
@@ -128,7 +128,7 @@ def _steady_states_poly(k_o_ads, k_co_ads, k_co_des, k_rxn, Z):
     variable w, which breaks once r_des_o = Z*k_o_des*y^2 adds an independent
     y-dependence to dy/dt.
     """
-    # with P(w) = k_co_ads*w - Z*k_o_ads*w^2 and Q(w) = k_co_des*(1-w) - P(w) the
+    # with P(w) = k_co_ads*w, Z*k_o_ads*w^2 and Q(w) = k_co_des*(1-w) - P(w) the
     # conditions reduce to k_rxn*P(w)*Q(w) - k_co_des^2*k_o_ads*w^2 = 0
     P = np.array([-Z * k_o_ads, k_co_ads, 0.0])              # descending coeffs
     Q = np.array([Z * k_o_ads, -(k_co_ads + k_co_des), k_co_des])
@@ -199,7 +199,7 @@ def steady_states(k_o_ads, k_co_ads=1.6, k_co_des=1e-3, k_rxn=1.0, Z=4, model="m
     """All physical steady states at a given k_o_ads, sorted by theta_CO.
 
     The exact quartic solver only applies to the plain mean-field model with
-    irreversible O2 adsorption (k_o_des = 0); any other combination falls back
+    irreversible O2 adsorption (k_o_des = 0). Any other combination falls back
     to the Newton solver.
     """
     if model == "mf" and k_o_des == 0.0:

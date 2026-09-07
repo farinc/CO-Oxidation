@@ -32,7 +32,7 @@ from .params import RunConfig
 def parse_observable_options(specs: Iterable[str]) -> dict[str, dict[str, str]]:
     """--observable-option NAME.KEY=VALUE, repeatable, into {name: {key: value}}.
 
-    Values stay strings here; ctx.option() casts each to the type of the default the
+    Values stay strings here. Ctx.option() casts each to the type of the default the
     observable asks with, so an observable declares its own option types."""
     options: dict[str, dict[str, str]] = {}
     for spec in specs:
@@ -77,7 +77,7 @@ def describe_available(modules: Sequence[str] = ()) -> str:
 
 
 def has_family(names: Sequence[str], family: str) -> bool:
-    """Whether any requested observable belongs to `family` -- lets a driver skip
+    """Whether any requested observable belongs to `family`, lets a driver skip
     building a context (and, for ME-MKM, keeping a state around) for nothing."""
     return bool(resolve(names, family))
 

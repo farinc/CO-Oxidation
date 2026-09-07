@@ -82,7 +82,7 @@ def build_tile(memkm_sites: int):
 
 def save_graph_html(tile, config: RunConfig, out_prefix: str) -> str:
     """Write the coverage-class transition graph for `tile` as a self-contained
-    {out_prefix}_graph.html viewer (structure only, from the tile/reactions -- no
+    {out_prefix}_graph.html viewer (structure only, from the tile/reactions, no
     PETSc/SLEPc solve, no Theta weighting)."""
     from me_mkm import build_graph, save_html
 
@@ -97,27 +97,25 @@ def save_graph_html(tile, config: RunConfig, out_prefix: str) -> str:
 
 def run_memkm_for_step(config: RunConfig, tile, n_eigs_scan: int = 4,
                         sigma_scale: float = 1e-8, factor=None,
-                        order_species: str = "CO", solve_left: bool = True,
-                        n_eigs_left: int = 3, comm=None,
+                        order_species: str = "CO", comm=None,
                         coverage_cache: dict | None = None
                         ) -> tuple[MemkmStepResult | None, dict | None]:
     """One-shot ME-MKM solve at this step's config, decoupled from any Brent search.
 
-    `solve_left`, when False, skips the extra distributed left-eigenpair
-    factorization (the dominant per-step cost of --memkm on a large grid) and leaves
-    cov_phi as None.
+    The left modes come from the same two-sided solve as the right ones, so there
+    is no separate left-eigenpair factorization to skip any more, and psi_L_2 is
+    needed regardless, since it *is* the reaction coordinate.
 
-    Returns (result, state). `state` is solve_memkm_state's raw output -- the
-    stationary distribution, slow eigenpairs and basin masks -- handed back so
+    Returns (result, state). `state` is solve_memkm_state's raw output, the
+    stationary distribution, slow eigenpairs and basin masks, handed back so
     memkm-family observables can run on this point without paying for a second
-    eigensolve (sweeps.observables.run_memkm_observables); ignore it if you only want
+    eigensolve (sweeps.observables.run_memkm_observables). Ignore it if you only want
     the summary. Both are None if this step turns out to have no two-basin structure to
     report on (a reducible generator or a monostable point, see
     NoCoexistingMacrostatesError) instead of failing the whole sweep over one step."""
     from co_oxidation.memkm.coexistence import (
         NoCoexistingMacrostatesError,
         coverage_grids,
-        solve_left_modes,
         solve_memkm_state,
         species_coverage_array,
     )
@@ -130,13 +128,8 @@ def run_memkm_for_step(config: RunConfig, tile, n_eigs_scan: int = 4,
             print(f"  [memkm] skipped: {exc}", flush=True)
         return None, None
     builder, theta = state["builder"], state["theta"]
-
-    psi_L_2 = None
-    if solve_left:
-        left = solve_left_modes(state, n_eigs_left, comm, factor)
-        psi_L_2 = left["psi_L_2"]
-
-    cov_pop, cov_phi, cov_r2, cov_deg = coverage_grids(builder, theta, psi_L_2,
+    cov_pop, cov_phi, cov_r2, cov_deg = coverage_grids(builder, theta,
+                                                       state["psi_L_2"],
                                                        state["psi_R_2"])
 
     def species_coverage(name):

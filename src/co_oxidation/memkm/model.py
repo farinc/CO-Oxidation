@@ -6,7 +6,7 @@ def generate_model(k_o_ads, tile, k_o_des_scale=1e-4, k_co_ads=1.6, k_co_des=1e-
     """ME-MKM generator at one k_o_ads.
 
     The physical parameters mirror the kMC model (co_oxidation.kmc.KMCParams)
-    so both phases describe the same chemistry; the sweep drivers thread the
+    so both phases describe the same chemistry. The sweep drivers thread the
     same CLI values into both:
 
       k_co_ads     CO adsorption rate, s^-1
@@ -15,7 +15,7 @@ def generate_model(k_o_ads, tile, k_o_des_scale=1e-4, k_co_ads=1.6, k_co_des=1e-
       khop_scale   fast-diffusion factor: khop = khop_scale * max(k_o_ads, k_co_ads)
       eps          CO-CO nearest-neighbour repulsion, J/mol (enters as -eps)
       temperature  temperature, K
-      k_o_des_scale  O2 desorption scale: k_o_des = k_o_des_scale * k_o_ads; 0.0 for
+      k_o_des_scale  O2 desorption scale: k_o_des = k_o_des_scale * k_o_ads. 0.0 for
                    irreversible O2 adsorption.
     """
     khop = khop_scale * max(k_o_ads, k_co_ads)

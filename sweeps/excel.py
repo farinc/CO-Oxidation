@@ -105,7 +105,7 @@ def _write_observables_sheet(writer, result: SweepResult):
 def _write_observable_arrays_sheet(writer, sheet_name, arrays: dict):
     """The array-valued --observable results for one step, one column each, NaN-padded
     to the longest. Multidimensional arrays are flattened in C order (the observable
-    knows its own shape; the sheet is a transport format, not a structure), and a
+    knows its own shape. The sheet is a transport format, not a structure), and a
     complex array is split into {key}_re / {key}_im since a cell holds one real."""
     columns = {}
     for key, value in arrays.items():
@@ -204,7 +204,7 @@ def _write_coexistence_sheet(writer, crossings: list[CoexistenceCrossing]):
 
 def _write_memkm_crossing_sheet(writer, sheet_name, crossing: CoexistenceCrossing):
     arrays, row = crossing.arrays, crossing.row
-    # report()'s row already carries the basin-conditioned coverages and P_A; the
+    # report()'s row already carries the basin-conditioned coverages and P_A. The
     # overall means are their basin-weighted average, P_A*x_A + P_B*x_B.
     theta_co = row["P_A"] * row["co_A"] + row["P_B"] * row["co_B"]
     theta_o = row["P_A"] * row["o_A"] + row["P_B"] * row["o_B"]
@@ -310,8 +310,8 @@ def _read_memkm_sheet(wb, sheet_name) -> MemkmStepResult:
 
 def _read_observables(path, wb, sheetnames) -> dict[int, dict]:
     """Rebuild each step's observable dict from the Observables sheet (scalars) and its
-    S{i}_OBS sheet (arrays). Arrays come back flattened -- the sheet never recorded
-    their shape -- and a complex array comes back through its _re/_im column pair."""
+    S{i}_OBS sheet (arrays). Arrays come back flattened, the sheet never recorded
+    their shape, and a complex array comes back through its _re/_im column pair."""
     by_step: dict[int, dict] = {}
     if "Observables" in sheetnames:
         df = pd.read_excel(path, sheet_name="Observables")

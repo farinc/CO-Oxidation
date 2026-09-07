@@ -1,6 +1,6 @@
 """
 MPI sweep. Phase A (kMC): grid steps are split round-robin across MPI ranks (each rank
-runs all 2*n_trajectories trajectories of its assigned steps) and gathered on rank 0 --
+runs all 2*n_trajectories trajectories of its assigned steps) and gathered on rank 0,
 embarrassingly parallel. Phase B (ME-MKM, optional): every rank cooperates on each
 step's distributed generator, one step at a time, so a --coexistence Brent search stays
 in lockstep across ranks. Phase C (mean field): computed serially on rank 0 (cheap ODE
@@ -74,14 +74,14 @@ def main():
             for idx, values in part.items():
                 observables_by_step.setdefault(idx, {}).update(values)
 
-    # Phase B: ME-MKM, collective per step (all ranks in lockstep -- every rank must
+    # Phase B: ME-MKM, collective per step (all ranks in lockstep, every rank must
     # take part in every step's distributed PETSc/SLEPc solve).
     memkm_by_step = {}
     if args.memkm:
         if rank == 0:
             print("ME-MKM / SLEPc phase", flush=True)
-        # Per-microstate coverage arrays depend only on the tile, not the physics --
-        # scope the cache per tile (memkm_sites) so steps at different site counts
+        # Per-microstate coverage arrays depend only on the tile, not the physics,
+        # so scope the cache per tile (memkm_sites) so steps at different site counts
         # never share it.
         coverage_caches: dict[int, dict] = {}
         for grid_step in grid.steps:
@@ -90,7 +90,7 @@ def main():
             result, state = run_memkm_for_step(
                 cfg, tile_for(cfg.memkm_sites), n_eigs_scan=args.memkm_n_eigs_scan,
                 factor=args.memkm_factor_solver, order_species=args.memkm_order_species,
-                solve_left=not args.memkm_skip_left_modes, comm=comm, coverage_cache=cache)
+                comm=comm, coverage_cache=cache)
             memkm_by_step[grid_step.index] = result
             if args.observables:
                 # Collective: every rank runs these on the same replicated state, so an

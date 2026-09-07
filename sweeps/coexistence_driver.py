@@ -20,11 +20,11 @@ def validate_bisection_axis(grid: SweepGrid, bisection_axis: str, coexistence_en
     Brent search:
       - bisection_axis is a discrete/structural ME-MKM parameter (site count changes
         the microstate space itself, so the pipeline can't be evaluated "between" two
-        site counts and Brent's method requires continuity);
+        site counts and Brent's method requires continuity),
       - bisection_axis isn't a swept axis and no fixed_value was given (there is then
         no scan to bracket a sign change from).
     A fixed (non-swept) memkm_sites value is still fully supported for building the
-    tile; the first check only fires when it is *also* the designated bisection axis.
+    tile. The first check only fires when it is *also* the designated bisection axis.
     """
     if not coexistence_enabled:
         return
@@ -49,7 +49,7 @@ def validate_bisection_axis(grid: SweepGrid, bisection_axis: str, coexistence_en
 
 def _slices(grid: SweepGrid, bisection_axis: str):
     """Group grid.steps by every swept axis EXCEPT bisection_axis. Each group ("slice")
-    shares one combination of the other swept axes' values; a grid with only
+    shares one combination of the other swept axes' values. A grid with only
     bisection_axis swept (or nothing swept) yields exactly one slice."""
     other_names = [a.name for a in grid.axes if a.name != bisection_axis]
     groups: "OrderedDict[tuple, list]" = OrderedDict()
@@ -64,9 +64,9 @@ def run_coexistence_for_grid(grid: SweepGrid, bisection_axis: str, comm=None,
                               n_eigs: int = 4, xtol: float = 1e-5, factor=None,
                               order_species: str = "CO",
                               fixed_value: float | None = None) -> list[CoexistenceCrossing]:
-    """One independent CoexistencePipeline + Brent search per slice (see _slices);
-    each slice's tile is built from that slice's own resolved memkm_sites (so
-    memkm_sites may legally be an *outer* swept axis, just never the bisection axis --
+    """One independent CoexistencePipeline + Brent search per slice (see _slices).
+    Each slice's tile is built from that slice's own resolved memkm_sites (so
+    memkm_sites may legally be an *outer* swept axis, just never the bisection axis,
     validate_bisection_axis enforces that). Scans the slice's own bisection-axis grid
     values (no separate scan-resolution flag needed) unless `fixed_value` is given, in
     which case that value stands in for the crossing directly and the scan/Brent step

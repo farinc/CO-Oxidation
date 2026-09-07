@@ -15,7 +15,7 @@ Model (site states: 0 = empty, 1 = CO*, 2 = O*):
 Here n is the number of CO nearest neighbours of the CO* involved, and eps > 0
 is the CO-CO nearest-neighbour repulsion. Barriers follow BEP relations with
 omega = 1 for desorption and reaction and omega = 1/2 for hops. For a hop,
-dn = n_final - n_initial, and the moving CO is excluded from the destination
+dn = n_final, n_initial, and the moving CO is excluded from the destination
 neighbour count. That exclusion fixes a self-counting bias in the earlier
 direct-kMC script and restores detailed balance for diffusion.
 
@@ -459,7 +459,7 @@ class KMCParams:
     k_co_ads: float = 1.6              # CO adsorption rate, s^-1
     k_co_des: float = 1e-3             # CO desorption prefactor, s^-1
     k_rxn: float = 1.0                 # CO+O reaction prefactor, s^-1
-    k_o_des: float = 0.0              # O2 desorption rate, s^-1; 0 keeps O2 ads irreversible
+    k_o_des: float = 0.0              # O2 desorption rate, s^-1. 0 keeps O2 ads irreversible
     eps: float = 8368.0             # CO-CO NN repulsion, J/mol
     T: float = 500.0                # temperature, K
     khop: float | None = None       # hop rate, defaults to khop_scale*max(k_o_ads, k_co_ads)
@@ -542,7 +542,7 @@ def run_kmc(k_o_ads, init="empty", params=None, lat0=None, **overrides):
 @njit(cache=False)
 def _run_first_passage(lat, L, class_rate, predicate, t_max, max_steps, seed):
     """Run until predicate(n_empty, n_co, n_o, N) is true, or until the time/step
-    limit. Returns (t_hit, hit, t_final, steps, stuck); t_hit is NaN when the run
+    limit. Returns (t_hit, hit, t_final, steps, stuck), t_hit is NaN when the run
     ended without ever satisfying the predicate."""
     if seed >= 0:
         np.random.seed(seed)
@@ -558,8 +558,8 @@ def _run_first_passage(lat, L, class_rate, predicate, t_max, max_steps, seed):
     affected = np.empty(26, np.int64)
     t = 0.0
     steps = 0
-    # a starting configuration already in the target set has passage time zero;
-    # testing before the loop keeps that case from being reported as a miss
+    # a starting configuration already in the target set has passage time zero.
+    # Testing before the loop keeps that case from being reported as a miss
     if predicate(N - n_co - n_o, n_co, n_o, N):
         return 0.0, True, 0.0, 0, False
     while t < t_max and steps < max_steps:
@@ -597,7 +597,7 @@ def coverage_predicate(species="co", threshold=0.5, above=True):
 
     `above=True` stops the first time theta_species >= threshold, `above=False` the
     first time it drops to <= threshold. This is the predicate factory to reach for
-    first; write your own njit (n_empty, n_co, n_o, N) -> bool for anything else."""
+    first. Write your own njit (n_empty, n_co, n_o, N) -> bool for anything else."""
     codes = {"empty": 0, "co": 1, "o": 2}
     if species not in codes:
         raise ValueError(f"unknown species {species!r}, choose from {sorted(codes)}")
@@ -625,7 +625,7 @@ def run_first_passage(k_o_ads, predicate, init="empty", params=None, lat0=None,
                       **overrides):
     """Run one kMC trajectory until `predicate` first holds, and report when.
 
-    `predicate` is an njit function (n_empty, n_co, n_o, N) -> bool; build a common one
+    `predicate` is an njit function (n_empty, n_co, n_o, N) -> bool. Build a common one
     with coverage_predicate(). Parameters are the same KMCParams as run_kmc, and
     params.t_max / params.max_steps still bound the run: a trajectory that reaches
     either without hitting comes back with hit=False and t_hit=NaN, i.e. censored at

@@ -1,7 +1,7 @@
 """What an observable is handed: one context object per family, carrying everything
 that parameter point already knows plus the means to ask the simulation for more.
 
-The split follows the two simulations. A kMC observable gets trajectories and a runner;
+The split follows the two simulations. A kMC observable gets trajectories and a runner,
 an ME-MKM observable gets a solved spectrum and the generator. Both carry `options`, so
 an observable can be tuned from the command line without a new CLI flag per knob.
 
@@ -50,10 +50,10 @@ class KMCContext(_BaseContext):
     """Context for family="kmc" observables.
 
     `results` holds the trajectories the sweep already ran at this parameter point
-    (co_oxidation.kmc.KMCResult, or the sweep's KMCTrajectoryResult -- both expose
+    (co_oxidation.kmc.KMCResult, or the sweep's KMCTrajectoryResult, both expose
     times/cov_*/steady_*/t_final/steps/stuck), so a post-hoc observable never re-runs
     anything. `run` and `run_first_passage` are there for observables that genuinely
-    need their own trajectories -- more samples than the sweep ran, a different initial
+    need their own trajectories, more samples than the sweep ran, a different initial
     condition, or a run stopped on a condition rather than at a fixed time.
 
     Seeds for those extra runs come from `seed(k)`, offset from the sweep's own seed
@@ -71,7 +71,7 @@ class KMCContext(_BaseContext):
     def seed(self, k: int = 0) -> int:
         """The k-th deterministic seed reserved for observables at this point."""
         if self.params.seed < 0:
-            return -1              # the run asked for an unseeded RNG; respect it
+            return -1              # the run asked for an unseeded RNG. Respect it
         return self.seed_base + self.SEED_STRIDE + k
 
     def run(self, init="empty", **overrides):
@@ -100,9 +100,9 @@ class KMCContext(_BaseContext):
 class MemkmContext(_BaseContext):
     """Context for family="memkm" observables: one solved ME-MKM point.
 
-    `state` is exactly what coexistence.solve_memkm_state returned -- builder, the
+    `state` is exactly what coexistence.solve_memkm_state returned, builder, the
     stationary distribution theta, the slow eigenvalues/eigenvectors, the oriented
-    psi_R_2 and the in_A/in_B spectral basin masks -- all already gathered to every
+    psi_R_2 and the in_A/in_B spectral basin masks, all already gathered to every
     rank. Anything that only reweights those (moments, marginals, basin conditionals)
     is pure numpy and costs nothing.
 

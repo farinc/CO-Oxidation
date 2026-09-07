@@ -1,5 +1,5 @@
 """In-memory result model for one sweep run, shared by sweeps.excel (the workbook
-writer/reader) and sweeps.plotting -- neither re-derives data the other already holds."""
+writer/reader) and sweeps.plotting, neither re-derives data the other already holds."""
 
 from dataclasses import dataclass, field
 from typing import Any
