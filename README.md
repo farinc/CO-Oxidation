@@ -170,6 +170,31 @@ it, with its message in the sheet as `{name}.error`.
 
 `examples/observables_example.py` is a worked pair to copy from.
 
+### Rare transitions: forward flux sampling (skeleton)
+
+Inside the bistable window, the reactive to CO-rich switch is too rare for
+direct kMC. `sweeps/ffs.py` is the entry point for measuring it with forward
+flux sampling, giving the plain FFS (Allen et al.) and FFS in time (FFST,
+Adams et al.) poisoning times at every grid point.
+
+The integration is in place: the CLI, the FFS settings, the order parameters,
+MPI, the workbook and the plots. The algorithm itself is a skeleton. The two
+kernels in `kmc.py` and the stage, estimator and driver functions in
+`co_oxidation/ffs.py` raise `NotImplementedError`, and each docstring
+describes what belongs there. Until they are filled in, every step is recorded
+as failed in the workbook's `FFS_Summary` sheet.
+
+```sh
+uv run python -m sweeps.ffs --ffs-lambda-A 0.2 --ffs-lambda-B 0.7 \
+    --kmc-L 32 --sweep k_o_ads=1.8:2.6:0.2 --out ffs_window
+uv run python -m sweeps.ffs --ffs-list-order-parameters
+```
+
+The physics and `--sweep` options are the same as above. The order parameter
+defaults to θ_CO. Pick another with `--ffs-order-parameter`, or register your
+own with `--ffs-order-module`. The tests in `tests/test_ffs.py` that need the
+algorithm are marked `xfail` and start passing once it is implemented.
+
 ### Running on an HPC cluster
 
 `sweeps/mpi.py` splits the sweep's grid points round-robin across MPI ranks

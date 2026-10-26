@@ -58,6 +58,41 @@ def write_workbook(result: SweepResult, path) -> None:
                 _write_memkm_crossing_sheet(writer, f"C{i}_MEMKM", crossing)
 
 
+def write_ffs_workbook(grid: SweepGrid, results: list, settings: dict, path) -> None:
+    """Workbook for a sweeps.ffs run.
+
+    `results` pairs each GridStep with its co_oxidation.ffs.FFSResult, or with the
+    exception that stopped that step. Sheets are Parameters, Axes, Grid, FFS_Settings,
+    FFS_Summary (one row per step), S{n}_FFS (one row per interface) and FFS_Warnings."""
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        _write_parameters_sheet(writer, grid.base, grid.axes)
+        _write_axes_sheet(writer, grid.axes)
+        _write_grid_sheet(writer, grid)
+        pd.DataFrame([{"name": k, "value": str(v) if isinstance(v, (list, tuple)) else v}
+                      for k, v in settings.items()]).to_excel(
+            writer, sheet_name="FFS_Settings", index=False)
+
+        summary, warnings = [], []
+        for step, result in results:
+            row = {"step_index": step.index, **step.axis_values,
+                   "k_o_ads": step.config.k_o_ads, "kmc_L": step.config.kmc_L}
+            if isinstance(result, Exception):
+                row["error"] = f"{type(result).__name__}: {result}"
+            else:
+                row.update(result.summary_row())
+                warnings += [{"step_index": step.index, "warning": w}
+                             for w in result.warnings]
+            summary.append(row)
+        pd.DataFrame(summary).to_excel(writer, sheet_name="FFS_Summary", index=False)
+
+        for step, result in results:
+            if not isinstance(result, Exception):
+                pd.DataFrame(result.interface_rows()).to_excel(
+                    writer, sheet_name=f"S{step.index}_FFS", index=False)
+        if warnings:
+            pd.DataFrame(warnings).to_excel(writer, sheet_name="FFS_Warnings", index=False)
+
+
 def _write_parameters_sheet(writer, base: RunConfig, axes: list[AxisSpec]):
     swept_names = {a.name for a in axes}
     rows = [{"name": f.name, "value": getattr(base, f.name), "swept": f.name in swept_names}

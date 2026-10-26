@@ -621,6 +621,62 @@ def coverage_predicate(species="co", threshold=0.5, above=True):
     return predicate
 
 
+def class_rates_for(k_o_ads, params):
+    """The 21 class rates for a KMCParams at O2 impingement rate k_o_ads."""
+    khop = (params.khop if params.khop is not None
+            else params.khop_scale * max(k_o_ads, params.k_co_ads))
+    return make_class_rates(params.k_co_ads, params.k_co_des, k_o_ads, params.k_rxn,
+                            khop, params.k_o_des, params.eps, params.T)
+
+
+# forward flux sampling kernels (skeleton)
+# These two loops will drive FFS. They reuse the n-fold machinery of _run but watch an
+# order parameter op instead of sampling coverages. Because op is passed in as a
+# function, the finished kernels need @njit(cache=False), like _run_first_passage.
+
+TRIAL_SUCCESS = 1      # reached hi
+TRIAL_FAILURE = -1     # fell back to lo, the edge of basin A
+TRIAL_CENSORED = 0     # hit t_max or max_steps first
+TRIAL_STUCK = -2       # no event left to fire (O-poisoned lattice)
+
+
+def _run_ffs_trial(lat, L, class_rate, op, stride, lo, hi, t_max, max_steps, seed):
+    r"""Run one FFS trial until the order parameter reaches hi or drops to lo.
+
+    It's the same event loop as _run_first_passage, except that it
+    watches the order parameter op, checking it every `stride` events. Draw the random
+    numbers in the same order as _run_first_passage so both give the same trajectory
+    for the same seed, because the tests compare the two. Check op once before the
+    loop too, in case the start is already past a limit.
+
+    Keep track of the largest value op reaches, since dynamic placement needs it.
+    Return TRIAL_STUCK if the total rate drops to zero and TRIAL_CENSORED if the time
+    or step limit runs out. Edit lat in place so the caller keeps the end
+    configuration, and return (outcome, lam_end, lam_max, t, steps).
+    """
+    raise NotImplementedError("kmc._run_ffs_trial is part of the FFS skeleton")
+
+
+def _run_ffs_flux(lat, L, class_rate, op, stride, lam_A, lam_0, lam_B, n_crossings,
+                  t_equil, t_max, max_steps, seed, snap_out, t_int_out, t_cross_out):
+    r"""Run the long stage-1 trajectory and record every crossing of lam_0 that comes from A.
+
+    Use the same event loop as _run_ffs_trial and ignore everything
+    before t_equil. Two flags do the bookkeeping. $h_A$ is true when the run was last
+    in basin A ($\lambda \le \lambda_A$) rather than B ($\lambda \ge \lambda_B$). The
+    time spent with $h_A$ true adds up to $T_1 = \sum \Delta t$. `armed` is set on
+    entering A and cleared at a crossing, so only the first crossing after leaving A
+    counts.
+
+    At each counted crossing, save the lattice, the time since the run last entered A
+    and the running $T_1$. The time since entering A is one $T_{\mathrm{int}}$ sample,
+    or NaN if the entry wasn't seen. If the run ever reaches lam_B, put it back in A
+    by restoring the lattice saved at the last entry, then rebuild the tables. Return
+    (q, t_hA, t, steps, n_restarts, stuck).
+    """
+    raise NotImplementedError("kmc._run_ffs_flux is part of the FFS skeleton")
+
+
 def run_first_passage(k_o_ads, predicate, init="empty", params=None, lat0=None,
                       **overrides):
     """Run one kMC trajectory until `predicate` first holds, and report when.

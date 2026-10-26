@@ -39,6 +39,35 @@ def kmc_branching(ctx):
     }
 
 
+@observable("lifetime_stats", family=KMC)
+def lifetime_stats(ctx):
+    """Brute-force lifetime of the reactive state and its relative spread r.
+
+    Runs n first-passage trajectories from the empty lattice until theta_CO reaches
+    theta_b. r = std/mean is about 1 for single-droplet (exponential) decay and much
+    smaller for multi-droplet decay (Machado, Buendia and Rikvold 2005, Eq. 10). The
+    crossover at r = 1/2 is their dynamic spinodal. Censored runs are left out of the
+    moments and counted in frac_censored, so a large value means t_max is too short.
+
+    Options: lifetime_stats.n (20), lifetime_stats.theta_b (0.5),
+    lifetime_stats.t_max (the run's kmc t_max)."""
+    from ..kmc import coverage_predicate
+
+    n = ctx.option("lifetime_stats", "n", 20)
+    theta_b = ctx.option("lifetime_stats", "theta_b", 0.5)
+    t_max = ctx.option("lifetime_stats", "t_max", float(ctx.params.t_max))
+    predicate = coverage_predicate("co", threshold=theta_b, above=True)
+    runs = ctx.run_first_passage(predicate, init="empty", n_trajectories=n, t_max=t_max)
+    taus = np.array([r.t_hit for r in runs if r.hit], float)
+    out = {"n_runs": len(runs), "n_hit": len(taus),
+           "frac_censored": float(1.0 - len(taus) / max(len(runs), 1))}
+    if len(taus) > 1:
+        mean = float(taus.mean())
+        std = float(taus.std(ddof=1))
+        out.update(tau_mean=mean, tau_std=std, r=std / mean if mean > 0 else np.nan)
+    return out
+
+
 @observable("coverage_moments", family=MEMKM)
 def coverage_moments(ctx):
     """Fluctuations of the adsorbate counts under the ME-MKM stationary distribution.

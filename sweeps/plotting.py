@@ -325,6 +325,96 @@ def plot_bifurcation(steps: list[StepResult], plot_axis: str, out_path: str,
     return out_path
 
 
+# --- forward flux sampling -----------------------------------------------------------
+
+# fixed categorical order, one hue per series, never cycled past eight
+SERIES_COLORS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300",
+                 "#6250d6", "#e34948")
+
+
+def _ffs_series(rows: list[tuple], x_name: str, series_names: list[str]):
+    """Group (step, result) pairs into series keyed by the other swept axes."""
+    series: dict[tuple, list] = {}
+    for step, result in rows:
+        key = tuple(step.axis_values[n] for n in series_names)
+        series.setdefault(key, []).append((step.config.__dict__[x_name], result))
+    if len(series) > len(SERIES_COLORS):
+        print(f"  [plot] {len(series)} series, only the first {len(SERIES_COLORS)} "
+              f"are drawn. Facet the sweep for the rest.")
+    return list(series.items())[:len(SERIES_COLORS)]
+
+
+def _series_label(names, key):
+    return ", ".join(f"{n}={v:g}" for n, v in zip(names, key)) or None
+
+
+def plot_ffs(grid, results: list, out_prefix: str, plot_axis: str | None = None) -> list[str]:
+    """Transition time against the swept axis, and ln(T)/L against L when L is swept.
+
+    FFST is drawn solid with bootstrap error bars and FFS dashed, in the same color for
+    the same series, so the estimators differ by line style and the series by color.
+    The second figure is Adams et al. Fig. 3, an estimate of the effective barrier."""
+    rows = [(s, r) for s, r in results if not isinstance(r, Exception) and r.completed]
+    if not rows:
+        print("  [plot] no completed FFS steps to plot")
+        return []
+    names = [a.name for a in grid.axes]
+    if plot_axis is None:
+        others = [n for n in names if n != "kmc_L"]
+        plot_axis = (others[0] if len(others) == 1 else
+                     names[0] if len(names) == 1 else None)
+    written = []
+    if plot_axis is None:
+        print("  [plot] pass --plot-axis to plot FFS times over more than one swept axis")
+    else:
+        series_names = [n for n in names if n != plot_axis]
+        fig, ax = plt.subplots(figsize=(8, 5.5), layout="constrained")
+        for color, (key, points) in zip(SERIES_COLORS, _ffs_series(rows, plot_axis,
+                                                                   series_names)):
+            points.sort(key=lambda p: p[0])
+            x = np.array([p[0] for p in points], float)
+            t_ffst = np.array([p[1].estimates["T_FFST"] for p in points])
+            err = np.array([p[1].errors.get("T_FFST_std", np.nan) for p in points])
+            t_ffs = np.array([p[1].estimates["T_FFS"] for p in points])
+            label = _series_label(series_names, key)
+            ax.errorbar(x, t_ffst, yerr=err, color=color, lw=2, marker="o", ms=8,
+                        capsize=3, label=label)
+            ax.plot(x, t_ffs, color=color, lw=2, ls="--", marker="o", ms=8,
+                    mfc="none")
+        ax.set_yscale("log")
+        ax.set_xlabel(plot_axis)
+        ax.set_ylabel("transition time (s)")
+        ax.set_title("Poisoning time: FFST solid, FFS dashed", fontsize="medium")
+        ax.grid(True, which="major", color="0.9", lw=0.8)
+        if ax.get_legend_handles_labels()[0] and series_names:
+            ax.legend(frameon=False)
+        path = f"{out_prefix}_ffs_times.png"
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        written.append(path)
+
+    if "kmc_L" in names and len({s.config.kmc_L for s, _ in rows}) > 1:
+        series_names = [n for n in names if n != "kmc_L"]
+        fig, ax = plt.subplots(figsize=(8, 5.5), layout="constrained")
+        for color, (key, points) in zip(SERIES_COLORS, _ffs_series(rows, "kmc_L",
+                                                                   series_names)):
+            points.sort(key=lambda p: p[0])
+            L = np.array([p[0] for p in points], float)
+            t = np.array([p[1].estimates["T_FFST"] for p in points])
+            ax.plot(L, np.log(t) / L, color=color, lw=2, marker="o", ms=8,
+                    label=_series_label(series_names, key))
+        ax.set_xlabel("L")
+        ax.set_ylabel(r"$\ln(T_\mathrm{FFST}) / L$")
+        ax.grid(True, which="major", color="0.9", lw=0.8)
+        if series_names:
+            ax.legend(frameon=False)
+        path = f"{out_prefix}_ffs_size_scaling.png"
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        written.append(path)
+    return written
+
+
 # --- orchestration + N-D faceting ------------------------------------------------------
 
 def group_steps(steps: list[StepResult], plot_axis: str) -> list[tuple[dict, list[StepResult]]]:
